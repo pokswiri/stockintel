@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StockIntel — AI 주식 뉴스 분석</title>
+<style>
+  :root {
+    --bg: #0a0f1e; --bg2: #0f172a; --bg3: #1e293b;
+    --text: #e2e8f0; --muted: #64748b; --faint: #334155;
+    --indigo: #6366f1; --indigo2: #818cf8;
+    --green: #10b981; --red: #ef4444; --amber: #f59e0b;
+    --blue: #3b82f6; --teal: #14b8a6;
+    --radius: 10px; --radius-sm: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif; min-height: 100vh; }
+  a { color: var(--indigo2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── 헤더 ── */
+  header { background: var(--bg2); border-bottom: 1px solid var(--faint); padding: 0 20px; position: sticky; top: 0; z-index: 100; }
+  .hd-inner { max-width: 960px; margin: 0 auto; height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .logo { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: var(--text); }
+  .logo-icon { width: 28px; height: 28px; border-radius: 7px; background: linear-gradient(135deg,var(--indigo),var(--indigo2)); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .range-btns { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--faint); border-radius: 8px; padding: 3px; }
+  .range-btn { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; background: transparent; color: var(--muted); transition: all .15s; }
+  .range-btn.active { background: var(--indigo); color: #fff; }
+  .hd-right { display: flex; align-items: center; gap: 8px; }
+  .ts { font-size: 10px; color: var(--muted); }
+  .btn-refresh { padding: 5px 12px; border-radius: 7px; font-size: 11px; font-weight: 700; border: none; cursor: pointer; background: linear-gradient(135deg,var(--indigo),var(--indigo2)); color: #fff; transition: all .15s; }
+  .btn-refresh:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ── 메인 ── */
+  main { max-width: 960px; margin: 0 auto; padding: 18px 16px 60px; }
+
+  /* ── 배너 ── */
+  .banner { border-radius: var(--radius); border: 1px solid; padding: 14px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .banner-text { flex: 1; }
+  .banner-label { font-size: 10px; color: var(--muted); letter-spacing: .07em; text-transform: uppercase; margin-bottom: 5px; }
+  .banner-headline { font-size: 15px; font-weight: 700; line-height: 1.4; }
+  .gauge-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .gauge-score { font-size: 18px; font-weight: 800; font-family: monospace; }
+  .sent-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 5px; }
+
+  /* ── 탭 ── */
+  .tabs { display: flex; border-bottom: 1px solid var(--faint); margin-bottom: 14px; overflow-x: auto; }
+  .tab { padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--muted); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; transition: color .15s; }
+  .tab.active { color: var(--indigo2); border-bottom-color: var(--indigo2); }
+
+  /* ── 섹션 ── */
+  .section { display: none; }
+  .section.show { display: block; }
+
+  /* ── 카드 ── */
+  .card { background: var(--bg2); border: 1px solid var(--faint); border-radius: var(--radius); padding: 14px 15px; margin-bottom: 12px; }
+  .card-title { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: .07em; text-transform: uppercase; margin-bottom: 11px; }
+
+  /* ── 이벤트 ── */
+  .ev { display: flex; gap: 10px; padding: 9px 11px; border-radius: 8px; border-left: 3px solid; margin-bottom: 7px; }
+  .ev-icon { font-size: 13px; flex-shrink: 0; padding-top: 1px; }
+  .ev-title { font-size: 12px; font-weight: 600; margin-bottom: 3px; }
+  .ev-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  /* ── 그리드 ── */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  @media(max-width:520px){ .grid2 { grid-template-columns: 1fr; } }
+
+  /* ── 섹터 카드 ── */
+  .sec-card { padding: 11px 13px; background: var(--bg); border-radius: 9px; border: 1px solid var(--faint); margin-bottom: 8px; }
+  .sec-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+  .sec-name { font-size: 13px; font-weight: 600; }
+  .bars { display: flex; gap: 3px; margin-top: 4px; }
+  .bar { width: 10px; height: 4px; border-radius: 2px; background: var(--faint); }
+  .bar.on { background: var(--indigo); }
+  .sec-reason { font-size: 11px; color: var(--muted); margin-top: 7px; line-height: 1.5; }
+
+  /* ── 종목 행 ── */
+  .stock-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--bg3); }
+  .stock-row:last-child { border-bottom: none; }
+  .tk { min-width: 48px; height: 28px; background: var(--bg3); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 10px; font-weight: 700; padding: 0 4px; text-align: center; line-height: 1.2; }
+  .stock-info { flex: 1; }
+  .stock-name { font-size: 13px; font-weight: 600; }
+  .stock-reason { font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .stock-price { text-align: right; font-size: 11px; }
+  .price-val { font-weight: 700; font-size: 13px; font-family: monospace; }
+  .price-chg { font-size: 10px; margin-top: 1px; }
+
+  /* ── 뉴스 ── */
+  .news-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--bg3); }
+  .news-item:last-child { border-bottom: none; }
+  .news-icon { font-size: 13px; flex-shrink: 0; padding-top: 2px; }
+  .news-body { flex: 1; }
+  .news-title { font-size: 12px; font-weight: 600; line-height: 1.4; margin-bottom: 4px; }
+  .news-summary { font-size: 11px; color: var(--muted); line-height: 1.5; margin-bottom: 5px; }
+  .news-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .news-src { font-size: 10px; color: var(--muted); }
+  .tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; }
+
+  /* ── 리스크 ── */
+  .risk-item { padding: 11px 13px; border-radius: 9px; border-left: 3px solid; margin-bottom: 9px; }
+  .risk-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+  .risk-title { font-size: 13px; font-weight: 600; }
+  .risk-desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+  /* ── 뱃지 ── */
+  .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+
+  /* ── 로딩 ── */
+  #loading { display: none; flex-direction: column; align-items: center; padding: 60px 20px; gap: 14px; }
+  #loading.show { display: flex; }
+  .spinner { width: 42px; height: 42px; border-radius: 50%; border: 3px solid var(--faint); border-top-color: var(--indigo); animation: spin .75s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .load-step { font-size: 13px; font-weight: 600; color: var(--indigo2); }
+  .load-sub { font-size: 11px; color: var(--muted); }
+  .step-dots { display: flex; gap: 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); transition: background .3s; }
+  .dot.on { background: var(--indigo); }
+
+  /* ── 에러 ── */
+  #error { display: none; text-align: center; padding: 44px 20px; }
+  #error.show { display: block; }
+
+  /* ── 면책 ── */
+  .disclaimer { font-size: 10px; color: var(--muted); line-height: 1.6; padding: 10px 12px; background: var(--bg2); border-radius: 8px; border: 1px solid var(--faint); margin-top: 6px; }
+
+  /* ── API 상태 ── */
+  .api-status { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .api-dot { display: flex; align-items: center; gap: 4px; font-size: 10px; }
+  .dot-circle { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* ── 뉴스 없음 안내 ── */
+  .no-api-banner { padding: 10px 13px; background: #1a1400; border: 1px solid var(--amber); border-radius: 8px; font-size: 11px; color: var(--amber); line-height: 1.7; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hd-inner">
+    <div class="logo">
+      <div class="logo-icon">◈</div>
+      StockIntel
+    </div>
+    <div class="range-btns">
+      <button class="range-btn" onclick="setRange(12,this)">12h</button>
+      <button class="range-btn active" onclick="setRange(24,this)">24h</button>
+      <button class="range-btn" onclick="setRange(72,this)">3일</button>
+      <button class="range-btn" onclick="setRange(168,this)">7일</button>
+    </div>
+    <div class="hd-right">
+      <span class="ts" id="ts-label"></span>
+      <button class="btn-refresh" id="btn-refresh" onclick="loadData()">🔄 분석</button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- API 상태 -->
+  <div class="api-status" id="api-status"></div>
+
+  <!-- 뉴스 없음 안내 -->
+  <div class="no-api-banner" id="no-api-banner" style="display:none">
+    ⚠️ Google/Naver 뉴스 API 키가 없어 Claude AI 지식 기반으로 분석합니다.
+    실제 뉴스 기사 수집을 원하시면 API 키를 서버에 설정하세요.
+  </div>
+
+  <!-- 로딩 -->
+  <div id="loading">
+    <div class="spinner"></div>
+    <div class="load-step" id="load-step">뉴스 수집 중</div>
+    <div class="step-dots">
+      <div class="dot on" id="d0"></div><div class="dot" id="d1"></div><div class="dot" id="d2"></div>
+    </div>
+    <div class="load-sub">약 10~20초 소요됩니다</div>
+  </div>
+
+  <!-- 에러 -->
+  <div id="error">
+    <div style="font-size:28px;margin-bottom:10px">⚠️</div>
+    <div style="color:var(--red);font-weight:600;margin-bottom:8px">분석 실패</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px" id="err-msg"></div>
+    <button class="btn-refresh" onclick="loadData()">다시 시도</button>
+  </div>
+
+  <!-- 대시보드 -->
+  <div id="dashboard" style="display:none">
+
+    <!-- 배너 -->
+    <div class="banner" id="banner">
+      <div class="banner-text">
+        <div class="banner-label" id="banner-label"></div>
+        <div class="banner-headline" id="banner-headline"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="gauge-wrap">
+          <svg width="90" height="52" viewBox="0 0 90 52" id="gauge-svg">
+            <defs><linearGradient id="gg" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#ef4444"/>
+              <stop offset="50%" stop-color="#f59e0b"/>
+              <stop offset="100%" stop-color="#10b981"/>
+            </linearGradient></defs>
+            <path d="M7 48 A38 38 0 0 1 83 48" fill="none" stroke="url(#gg)" stroke-width="6" stroke-linecap="round"/>
+            <line id="needle" x1="45" y1="48" x2="45" y2="14" stroke="#e2e8f0" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="45" cy="48" r="4" fill="#e2e8f0" id="needle-dot"/>
+          </svg>
+          <div class="gauge-score" id="gauge-score">0</div>
+        </div>
+        <div class="sent-badge" id="sent-badge"></div>
+      </div>
+    </div>
+
+    <!-- 탭 -->
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('overview',this)">📊 개요</button>
+      <button class="tab" onclick="showTab('us',this)">🇺🇸 미국</button>
+      <button class="tab" onclick="showTab('kr',this)">🇰🇷 국내</button>
+      <button class="tab" onclick="showTab('news',this)">📰 뉴스</button>
+      <button class="tab" onclick="showTab('risk',this)">⚠️ 리스크</button>
+    </div>
+
+    <!-- 개요 -->
+    <div class="section show" id="sec-overview">
+      <div class="card">
+        <div class="card-title">주요 시장 이벤트</div>
+        <div id="events-list"></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-title">🇺🇸 미국 전망</div>
+          <p style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:8px" id="us-outlook"></p>
+          <div style="display:flex;flex-wrap:wrap;gap:5px" id="us-sector-tags"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">🇰🇷 국내 전망</div>
+          <p style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:8px" id="kr-outlook"></p>
+          <div style="display:flex;flex-wrap:wrap;gap:5px" id="kr-sector-tags"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 미국 -->
+    <div class="section" id="sec-us">
+      <div class="card">
+        <div class="card-title">추천 섹터</div>
+        <div id="us-sectors"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">추천 종목</div>
+        <div id="us-stocks"></div>
+      </div>
+    </div>
+
+    <!-- 국내 -->
+    <div class="section" id="sec-kr">
+      <div class="card">
+        <div class="card-title">추천 섹터</div>
+        <div id="kr-sectors"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">추천 종목</div>
+        <div style="font-size:10px;color:#10b981;background:#0f2a1e;padding:5px 9px;border-radius:7px;margin-bottom:10px;border:1px solid #10b98120" id="krx-status">
+          KRX 인증키 연동 시 실시간 주가 표시
+        </div>
+        <div id="kr-stocks"></div>
+      </div>
+    </div>
+
+    <!-- 뉴스 -->
+    <div class="section" id="sec-news">
+      <div class="card">
+        <div class="card-title">주요 뉴스 하이라이트</div>
+        <div id="news-list"></div>
+      </div>
+    </div>
+
+    <!-- 리스크 -->
+    <div class="section" id="sec-risk">
+      <div class="card">
+        <div class="card-title">주요 리스크 요인</div>
+        <div id="risk-list"></div>
+      </div>
+    </div>
+
+    <div class="disclaimer">
+      ⚠ 본 분석은 AI가 뉴스를 수집·분석한 참고 정보입니다. 투자 권유가 아니며, 실제 투자 결정은 본인 판단과 전문가 상담을 통해 하시기 바랍니다.
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── 설정 — 배포 후 백엔드 URL로 변경 ────────────────────────────
+const API_BASE = window.BACKEND_URL || "https://your-app.railway.app";
+
+let currentHours = 24;
+let loadTimer = null;
+
+// ── 색상 유틸 ────────────────────────────────────────────────────
+const impactColor = i => i==="positive"?"#10b981":i==="negative"?"#ef4444":"#94a3b8";
+const impactIcon  = i => i==="positive"?"▲":i==="negative"?"▼":"─";
+const sigColor    = s => s==="buy"?"#10b981":s==="hold"?"#f59e0b":"#3b82f6";
+const sigLabel    = s => s==="buy"?"매수":s==="hold"?"보유":"관망";
+const riskColor   = s => s==="high"?"#ef4444":s==="medium"?"#f59e0b":"#10b981";
+const riskLabel   = s => s==="high"?"위험 高":s==="medium"?"위험 中":"위험 低";
+const sentColor   = s => s==="bullish"?"#10b981":s==="bearish"?"#ef4444":"#f59e0b";
+const sentLabel   = s => s==="bullish"?"강세 ▲":s==="bearish"?"약세 ▼":"중립 ─";
+
+function badge(text, color) {
+  return `<span class="badge" style="background:${color}18;color:${color};border:1px solid ${color}28">${text}</span>`;
+}
+function tag(text, color="#64748b") {
+  return `<span class="tag" style="background:${color}18;color:${color}">${text}</span>`;
+}
+
+// ── 게이지 ───────────────────────────────────────────────────────
+function setGauge(score) {
+  const v = Math.max(-100, Math.min(100, score||0));
+  const deg = ((v+100)/200)*180-90;
+  const rad = (deg-90)*Math.PI/180;
+  const x2 = 45+28*Math.cos(rad), y2 = 48+28*Math.sin(rad);
+  const col = v>20?"#10b981":v<-20?"#ef4444":"#f59e0b";
+  const needle = document.getElementById("needle");
+  const ndot   = document.getElementById("needle-dot");
+  needle.setAttribute("x2", x2); needle.setAttribute("y2", y2);
+  needle.setAttribute("stroke", col);
+  ndot.setAttribute("fill", col);
+  document.getElementById("gauge-score").textContent = (v>0?"+":"")+v;
+  document.getElementById("gauge-score").style.color = col;
+}
+
+// ── 범위 설정 ────────────────────────────────────────────────────
+function setRange(h, btn) {
+  currentHours = h;
+  document.querySelectorAll(".range-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+}
+
+// ── 탭 전환 ──────────────────────────────────────────────────────
+function showTab(id, btn) {
+  document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".section").forEach(s => s.classList.remove("show"));
+  btn.classList.add("active");
+  document.getElementById("sec-"+id).classList.add("show");
+}
+
+// ── 로딩 스텝 ────────────────────────────────────────────────────
+let stepIdx = 0;
+const STEPS = ["뉴스 수집 중", "AI 분석 중", "종목 추천 생성"];
+function startLoadAnim() {
+  stepIdx = 0;
+  loadTimer = setInterval(() => {
+    stepIdx = Math.min(stepIdx+1, STEPS.length-1);
+    document.getElementById("load-step").textContent = STEPS[stepIdx];
+    for(let i=0;i<3;i++) document.getElementById("d"+i).classList.toggle("on", i<=stepIdx);
+  }, 4000);
+}
+function stopLoadAnim() {
+  clearInterval(loadTimer);
+}
+
+// ── 상태 패널 ────────────────────────────────────────────────────
+function showLoading() {
+  document.getElementById("loading").classList.add("show");
+  document.getElementById("error").classList.remove("show");
+  document.getElementById("dashboard").style.display = "none";
+  document.getElementById("btn-refresh").disabled = true;
+  document.getElementById("load-step").textContent = STEPS[0];
+  startLoadAnim();
+}
+function showError(msg) {
+  stopLoadAnim();
+  document.getElementById("loading").classList.remove("show");
+  document.getElementById("error").classList.add("show");
+  document.getElementById("err-msg").textContent = msg;
+  document.getElementById("btn-refresh").disabled = false;
+}
+function showDashboard() {
+  stopLoadAnim();
+  document.getElementById("loading").classList.remove("show");
+  document.getElementById("error").classList.remove("show");
+  document.getElementById("dashboard").style.display = "block";
+  document.getElementById("btn-refresh").disabled = false;
+}
+
+// ── 렌더링 ───────────────────────────────────────────────────────
+function render(data) {
+  const a = data.analysis || {};
+  const s = a.summary || {};
+  const us = a.us_market || {};
+  const kr = a.kr_market || {};
+
+  // API 상태
+  const health = data._health || {};
+  const apiEl = document.getElementById("api-status");
+  // AI 엔진 표시
+  const engineLabel = {gemini:"Gemini AI", groq:"Groq AI", claude:"Claude AI"}[data.ai_engine] || "AI";
+  const apiItems = [
+    {k:"ai",     label: engineLabel,   forceOn: true},
+    {k:"google", label:"Google 뉴스"},
+    {k:"naver",  label:"Naver 뉴스"},
+    {k:"krx",    label:"KRX 주가"},
+  ];
+  apiEl.innerHTML = apiItems.map(item => {
+    const on = item.forceOn || health[item.k];
+    const col = on ? "#10b981" : "#64748b";
+    return `<div class="api-dot"><div class="dot-circle" style="background:${col}"></div><span style="font-size:10px;color:${on?"#94a3b8":"#475569"}">${item.label}</span></div>`;
+  }).join("");
+
+  // 뉴스 없음 안내
+  document.getElementById("no-api-banner").style.display =
+    data.fallback_mode ? "block" : "none";
+
+  // 배너
+  const sc = sentColor(s.sentiment);
+  const banner = document.getElementById("banner");
+  banner.style.background = `linear-gradient(135deg,${sc}0d,var(--bg2))`;
+  banner.style.borderColor = `${sc}28`;
+  document.getElementById("banner-label").textContent =
+    `최근 ${currentHours}시간 · 뉴스 ${data.news_count?.total||0}건 분석`;
+  document.getElementById("banner-headline").textContent = s.headline || "분석 완료";
+  setGauge(s.score || 0);
+  const sb = document.getElementById("sent-badge");
+  sb.textContent = sentLabel(s.sentiment);
+  sb.style.background = `${sc}18`;
+  sb.style.color = sc;
+
+  // 업데이트 시간
+  document.getElementById("ts-label").textContent =
+    new Date(data.analyzed_at).toLocaleTimeString("ko-KR");
+
+  // 이벤트
+  const evEl = document.getElementById("events-list");
+  evEl.innerHTML = (s.key_events||[]).map(e => `
+    <div class="ev" style="border-color:${impactColor(e.impact)};background:${impactColor(e.impact)}0d">
+      <div class="ev-icon" style="color:${impactColor(e.impact)}">${impactIcon(e.impact)}</div>
+      <div>
+        <div class="ev-title">${e.title}</div>
+        <div class="ev-desc">${e.detail}</div>
+      </div>
+    </div>`).join("");
+
+  // 미국 전망
+  document.getElementById("us-outlook").textContent = us.outlook || "";
+  document.getElementById("us-sector-tags").innerHTML =
+    (us.sectors||[]).map(s => tag(s.name_ko||s.name,"#3b82f6")).join(" ");
+
+  // 국내 전망
+  document.getElementById("kr-outlook").textContent = kr.outlook || "";
+  document.getElementById("kr-sector-tags").innerHTML =
+    (kr.sectors||[]).map(s => tag(s.name,"#10b981")).join(" ");
+
+  // 미국 섹터
+  document.getElementById("us-sectors").innerHTML = (us.sectors||[]).map(sec => `
+    <div class="sec-card">
+      <div class="sec-row">
+        <span class="sec-name">${sec.name_ko||sec.name}</span>
+        <div style="display:flex;align-items:center;gap:7px">
+          ${badge(sigLabel(sec.signal), sigColor(sec.signal))}
+          <span style="font-size:10px;color:var(--muted)">${sec.etf||""}</span>
+        </div>
+      </div>
+      <div class="bars">${[1,2,3,4,5].map(i=>`<div class="bar${i<=(sec.strength||3)?" on":""}"></div>`).join("")}</div>
+      <div class="sec-reason">${sec.reason}</div>
+    </div>`).join("");
+
+  // 미국 종목
+  document.getElementById("us-stocks").innerHTML = (us.stocks||[]).map(s => `
+    <div class="stock-row">
+      <div class="tk" style="color:var(--indigo2)">${s.ticker}</div>
+      <div class="stock-info">
+        <div class="stock-name">${s.name}</div>
+        <div class="stock-reason">${s.reason}</div>
+      </div>
+      <div style="text-align:right">
+        ${badge(sigLabel(s.signal), sigColor(s.signal))}
+        <div style="font-size:10px;color:${riskColor(s.risk)};margin-top:3px">${s.risk==="high"?"위험↑":s.risk==="medium"?"보통":"안전"}</div>
+      </div>
+    </div>`).join("");
+
+  // 국내 섹터
+  document.getElementById("kr-sectors").innerHTML = (kr.sectors||[]).map(sec => `
+    <div class="sec-card">
+      <div class="sec-row">
+        <span class="sec-name">${sec.name}</span>
+        <div style="display:flex;align-items:center;gap:7px">
+          ${badge(sigLabel(sec.signal), sigColor(sec.signal))}
+          <span style="font-size:10px;color:var(--muted)">${sec.key_stock||""}</span>
+        </div>
+      </div>
+      <div class="bars">${[1,2,3,4,5].map(i=>`<div class="bar${i<=(sec.strength||3)?" on":""}"></div>`).join("")}</div>
+      <div class="sec-reason">${sec.reason}</div>
+    </div>`).join("");
+
+  // 국내 종목 (KRX 주가 포함)
+  document.getElementById("krx-status").textContent =
+    data._health?.krx ? "✅ KRX 실시간 주가 연동 중" : "KRX 인증키 연동 시 실시간 주가 표시";
+
+  document.getElementById("kr-stocks").innerHTML = (kr.stocks||[]).map(s => {
+    const pd = s.price_data;
+    const chgNum = parseFloat(pd?.chg_pct || "0");
+    const chgColor = chgNum > 0 ? "#10b981" : chgNum < 0 ? "#ef4444" : "#94a3b8";
+    const priceHtml = pd?.close ? `
+      <div class="stock-price">
+        <div class="price-val" style="color:${chgColor}">${pd.close.toLocaleString()}원</div>
+        <div class="price-chg" style="color:${chgColor}">${chgNum>0?"+":""}${chgNum}%</div>
+      </div>` : `<div style="font-size:10px;color:var(--muted)">주가<br>미연동</div>`;
+    return `
+    <div class="stock-row">
+      <div class="tk" style="color:#10b981;font-size:9px">${s.code}</div>
+      <div class="stock-info">
+        <div class="stock-name">${s.name}</div>
+        <div class="stock-reason">${s.reason}${s.target_price?` · 목표 <b>${s.target_price}</b>`:""}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        ${badge(sigLabel(s.signal), sigColor(s.signal))}
+        ${priceHtml}
+      </div>
+    </div>`;
+  }).join("");
+
+  // 뉴스
+  document.getElementById("news-list").innerHTML = (a.top_news||[]).map(n => `
+    <div class="news-item">
+      <div class="news-icon" style="color:${impactColor(n.impact)}">${impactIcon(n.impact)}</div>
+      <div class="news-body">
+        <div class="news-title">
+          ${n.url ? `<a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>` : n.title}
+        </div>
+        <div class="news-summary">${n.summary||""}</div>
+        <div class="news-meta">
+          <span class="news-src">${n.source||""}</span>
+          ${n.category ? tag(n.category,"#f59e0b") : ""}
+        </div>
+      </div>
+    </div>`).join("");
+
+  // 리스크
+  document.getElementById("risk-list").innerHTML = (a.risks||[]).map(r => `
+    <div class="risk-item" style="border-color:${riskColor(r.severity)};background:${riskColor(r.severity)}0d">
+      <div class="risk-head">
+        <div class="risk-title">${r.title}</div>
+        ${badge(riskLabel(r.severity), riskColor(r.severity))}
+      </div>
+      <div class="risk-desc">${r.detail}</div>
+    </div>`).join("");
+
+  showDashboard();
+}
+
+// ── 데이터 로드 ──────────────────────────────────────────────────
+async function loadData() {
+  showLoading();
+  try {
+    // 헬스 체크
+    let health = {};
+    try {
+      const hr = await fetch(`${API_BASE}/health`, {signal: AbortSignal.timeout(5000)});
+      health = (await hr.json()).apis || {};
+    } catch {}
+
+    // 분석 요청
+    const res = await fetch(`${API_BASE}/analyze?hours=${currentHours}`, {
+      signal: AbortSignal.timeout(60000)
+    });
+    if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
+    const data = await res.json();
+    data._health = health;
+    render(data);
+  } catch(e) {
+    if (e.name === "TimeoutError") {
+      showError("요청 시간 초과 — 서버가 아직 시작 중일 수 있습니다. 잠시 후 다시 시도하세요.");
+    } else {
+      showError(e.message || "알 수 없는 오류");
+    }
+  }
+}
+
+// ── 초기 로드 ────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>
