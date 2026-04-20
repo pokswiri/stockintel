@@ -134,55 +134,119 @@ async def fetch_krx_price(isin: str, today: str) -> dict:
 # ── AI 분석 프롬프트 빌더 ─────────────────────────────────────────
 def build_prompt(news_items: list[dict], hours: int) -> str:
     news_text = ""
-    for i, item in enumerate(news_items[:45], 1):
+    for i, item in enumerate(news_items[:50], 1):
         lang = "[EN]" if item.get("lang") == "en" else "[KO]"
         news_text += f"{i}. {lang} {item['title']}\n"
         if item.get("snippet"):
-            news_text += f"   {item['snippet'][:150]}\n"
+            news_text += f"   내용: {item['snippet'][:200]}\n"
         if item.get("link"):
             news_text += f"   URL: {item['link']}\n"
         news_text += "\n"
 
-    return f"""다음은 최근 {hours}시간 이내의 글로벌·국내 주요 주식시장 뉴스 {len(news_items)}건입니다.
+    return f"""당신은 전문 주식 시장 애널리스트입니다.
+아래는 최근 {hours}시간 이내 수집된 글로벌·국내 뉴스 {len(news_items)}건입니다.
 
 {news_text}
 
-위 뉴스를 분석하여 아래 JSON만 출력하라. JSON 외 다른 텍스트 절대 금지. 배열은 항목별 최대 4개.
+[분석 지침]
+1. 주요 인물 발언(트럼프·머스크·젠슨황·파월 등), 경제지표(CPI·PPI·고용·GDP), 지정학(전쟁·협상), 원자재(유가·금·환율), 기업 실적·이슈를 각각 분리해서 분석하라.
+2. 각 이슈가 어떤 산업·섹터에 영향을 주는지 인과관계를 명확히 설명하라.
+   예) "젠슨황 AI 데이터센터 확장 발언 → 전력·냉각·반도체 수요 증가 → 관련 국내 종목 수혜"
+3. 국내 추천 종목은 반드시 실제 코스피·코스닥 상장 종목으로 6개 이상 제시하라.
+4. 미국 추천 종목도 실제 NYSE·NASDAQ 상장 종목으로 5개 이상 제시하라.
+5. 뉴스 하이라이트는 7개 이상, 각각 실제 URL 포함하라.
+
+아래 JSON 형식으로만 응답하라. JSON 외 텍스트 절대 금지.
 
 {{
   "summary": {{
-    "headline": "한 줄 시장 요약 25자 이내",
+    "headline": "오늘 시장 핵심 한줄 요약 30자 이내",
     "sentiment": "bullish 또는 bearish 또는 neutral",
     "score": -100에서 100 사이 정수,
-    "key_events": [
-      {{"title": "이벤트명", "impact": "positive 또는 negative 또는 neutral", "detail": "2문장 설명"}}
-    ]
+    "market_overview": "전반적 시장 상황 3문장 요약"
   }},
+  "key_issues": [
+    {{
+      "category": "인물발언 또는 경제지표 또는 지정학 또는 원자재 또는 기업이슈",
+      "person_or_event": "트럼프 또는 파월 또는 젠슨황 등 또는 이벤트명",
+      "title": "이슈 제목",
+      "detail": "이슈 상세 설명 3문장",
+      "impact": "positive 또는 negative 또는 neutral",
+      "affected_sectors": ["영향받는 섹터1", "섹터2"],
+      "news_url": "관련 뉴스 URL"
+    }}
+  ],
+  "top_news": [
+    {{
+      "title": "뉴스 제목",
+      "url": "실제 URL 필수",
+      "source": "출처매체명",
+      "lang": "en 또는 ko",
+      "impact": "positive 또는 negative 또는 neutral",
+      "category": "인물발언 또는 경제지표 또는 지정학 또는 원자재 또는 기업이슈 또는 시장동향",
+      "summary": "핵심 내용 2~3문장 요약. 투자 관점에서 왜 중요한지 포함"
+    }}
+  ],
   "us_market": {{
-    "outlook": "미국시장 전망 2문장",
+    "outlook": "미국 시장 전반 전망 2~3문장",
     "sectors": [
-      {{"name": "섹터영문", "name_ko": "섹터한글", "etf": "ETF티커", "strength": 1~5정수, "signal": "buy 또는 hold 또는 watch", "reason": "이유 1문장"}}
+      {{
+        "name": "섹터 영문명",
+        "name_ko": "섹터 한글명",
+        "etf": "대표 ETF 티커",
+        "strength": 1에서 5 사이 정수,
+        "signal": "buy 또는 hold 또는 watch",
+        "news_trigger": "이 섹터를 추천하게 된 뉴스 이슈 한줄",
+        "reason": "투자 근거 2문장"
+      }}
     ],
     "stocks": [
-      {{"ticker": "티커", "name": "회사명", "signal": "buy 또는 hold 또는 watch", "reason": "이유 1문장", "risk": "low 또는 medium 또는 high"}}
+      {{
+        "ticker": "티커심볼",
+        "name": "회사명",
+        "sector": "속한 섹터",
+        "signal": "buy 또는 hold 또는 watch",
+        "news_trigger": "추천 근거가 된 뉴스 이슈",
+        "reason": "투자 근거 2문장",
+        "risk": "low 또는 medium 또는 high"
+      }}
     ]
   }},
   "kr_market": {{
-    "outlook": "국내시장 전망 2문장",
+    "outlook": "국내 시장 전반 전망 2~3문장",
     "sectors": [
-      {{"name": "섹터명", "strength": 1~5정수, "signal": "buy 또는 hold 또는 watch", "reason": "이유 1문장", "key_stock": "대표종목명"}}
+      {{
+        "name": "섹터명",
+        "strength": 1에서 5 사이 정수,
+        "signal": "buy 또는 hold 또는 watch",
+        "news_trigger": "이 섹터를 추천하게 된 뉴스 이슈 한줄",
+        "reason": "투자 근거 2문장",
+        "key_stocks": ["종목명1", "종목명2", "종목명3"]
+      }}
     ],
     "stocks": [
-      {{"code": "종목코드6자리", "isin": "KR7XXXXXX000", "name": "종목명", "signal": "buy 또는 hold 또는 watch", "reason": "이유 1문장", "risk": "low 또는 medium 또는 high", "target_price": "목표주가원단위"}}
+      {{
+        "code": "종목코드 6자리",
+        "isin": "KR7로 시작하는 ISIN",
+        "name": "종목명",
+        "sector": "속한 섹터",
+        "signal": "buy 또는 hold 또는 watch",
+        "news_trigger": "추천 근거가 된 뉴스 이슈 한줄",
+        "reason": "투자 근거 2문장",
+        "risk": "low 또는 medium 또는 high",
+        "target_price": "목표주가 숫자만"
+      }}
     ]
   }},
   "risks": [
-    {{"title": "리스크명", "detail": "설명 2문장", "severity": "high 또는 medium 또는 low"}}
-  ],
-  "top_news": [
-    {{"title": "뉴스제목", "url": "실제URL", "source": "출처", "impact": "positive 또는 negative 또는 neutral", "category": "카테고리", "summary": "3문장 요약"}}
+    {{
+      "title": "리스크 제목",
+      "detail": "상세 설명 2~3문장",
+      "severity": "high 또는 medium 또는 low",
+      "related_sectors": ["영향 섹터1", "섹터2"]
+    }}
   ]
-}}"""
+}}
 
 # ── Gemini AI 분석 ────────────────────────────────────────────────
 async def analyze_gemini(prompt: str) -> dict:
