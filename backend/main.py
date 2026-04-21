@@ -450,11 +450,16 @@ async def analyze_gemini(prompt: str) -> dict:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4000},
     }
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(url, json=body)
-        r.raise_for_status()
-        text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        return parse_json(text)
+    for attempt in range(2):
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(url, json=body)
+            if r.status_code == 429 and attempt == 0:
+                await asyncio.sleep(15)
+                continue
+            r.raise_for_status()
+            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return parse_json(text)
+    raise RuntimeError("Gemini: rate limit after retry")
 
 
 async def analyze_groq(prompt: str) -> dict:
@@ -464,18 +469,25 @@ async def analyze_groq(prompt: str) -> dict:
         "temperature": 0.3,
         "max_tokens": 4000,
     }
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": "Bearer " + GROQ_KEY,
-                "Content-Type": "application/json",
-            },
-            json=body,
-        )
-        r.raise_for_status()
-        text = r.json()["choices"][0]["message"]["content"]
-        return parse_json(text)
+    for attempt in range(2):
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": "Bearer " + GROQ_KEY,
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            if r.status_code == 429 and attempt == 0:
+                await asyncio.sleep(15)
+                continue
+            if r.status_code == 413:
+                raise RuntimeError("Groq: payload too large")
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"]
+            return parse_json(text)
+    raise RuntimeError("Groq: rate limit after retry")
 
 
 async def analyze_claude(prompt: str) -> dict:
