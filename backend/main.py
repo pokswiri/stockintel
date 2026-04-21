@@ -156,36 +156,156 @@ def dedup_news(news_list: list) -> list:
     return result
 
 
-async def fetch_krx_price(isin: str, today: str) -> dict:
+def parse_krx_item(d: dict) -> dict:
+    def clean(v):
+        return v.replace(",", "").replace("-", "0").strip() if v else "0"
+    try:
+        close = int(clean(d.get("TDD_CLSPRC", "0")))
+    except Exception:
+        close = 0
+    try:
+        chg = float(clean(d.get("FLUC_RT", "0")))
+    except Exception:
+        chg = 0.0
+    try:
+        mktcap = int(clean(d.get("MKTCAP", "0")))
+    except Exception:
+        mktcap = 0
+    try:
+        volume = int(clean(d.get("ACC_TRDVOL", "0")))
+    except Exception:
+        volume = 0
+    return {
+        "code": d.get("ISU_CD", ""),
+        "name": d.get("ISU_NM", ""),
+        "close": close,
+        "chg_pct": chg,
+        "open": d.get("TDD_OPNPRC", ""),
+        "high": d.get("TDD_HGPRC", ""),
+        "low": d.get("TDD_LWPRC", ""),
+        "volume": volume,
+        "mktcap": mktcap,
+        "list_shrs": d.get("LIST_SHRS", ""),
+    }
+
+
+async def fetch_krx_market(today: str) -> dict:
+    """Fetch all KOSPI + KOSDAQ stocks for a given date. Returns dict keyed by ISU_CD."""
     if not KRX_AUTH_KEY:
         return {}
+    result = {}
+    endpoints = [
+        "https://data-dbg.krx.co.kr/svc/apis/sto/stk_bydd_trd",
+        "https://data-dbg.krx.co.kr/svc/apis/sto/ksq_bydd_trd",
+    ]
+    headers = {
+        "AUTH_KEY": KRX_AUTH_KEY,
+        "Content-Type": "application/json",
+    }
+    payload = {"basDd": today}
+    async with httpx.AsyncClient(timeout=20) as client:
+        for url in endpoints:
+            try:
+                r = await client.post(url, headers=headers, json=payload)
+                r.raise_for_status()
+                for d in r.json().get("OutBlock_1", []):
+                    code = d.get("ISU_CD", "")
+                    if code:
+                        result[code] = parse_krx_item(d)
+            except Exception:
+                continue
+    return result
+
+
+async def fetch_krx_indices(today: str) -> dict:
+    """Fetch KOSPI + KOSDAQ index data. Returns dict with kospi and kosdaq keys."""
+    if not KRX_AUTH_KEY:
+        return {}
+    result = {}
+    endpoints = {
+        "kospi": "https://data-dbg.krx.co.kr/svc/apis/idx/kospi_dd_trd",
+        "kosdaq": "https://data-dbg.krx.co.kr/svc/apis/idx/kosdaq_dd_trd",
+    }
+    headers = {"AUTH_KEY": KRX_AUTH_KEY, "Content-Type": "application/json"}
+    payload = {"basDd": today}
+    async with httpx.AsyncClient(timeout=15) as client:
+        for key, url in endpoints.items():
+            try:
+                r = await client.post(url, headers=headers, json=payload)
+                r.raise_for_status()
+                items = r.json().get("OutBlock_1", [])
+                # Find main index (KOSPI or KOSDAQ composite)
+                for d in items:
+                    nm = d.get("IDX_NM", "")
+                    if key == "kospi" and nm == "KOSPI":
+                        def cl(v): return v.replace(",", "").strip() if v else "0"
+                        result[key] = {
+                            "name": nm,
+                            "close": cl(d.get("CLSPRC_IDX", "0")),
+                            "chg_pct": cl(d.get("FLUC_RT", "0")),
+                            "chg": cl(d.get("CMPPREVDD_IDX", "0")),
+                        }
+                        break
+                    elif key == "kosdaq" and nm == "KOSDAQ":
+                        def cl2(v): return v.replace(",", "").strip() if v else "0"
+                        result[key] = {
+                            "name": nm,
+                            "close": cl2(d.get("CLSPRC_IDX", "0")),
+                            "chg_pct": cl2(d.get("FLUC_RT", "0")),
+                            "chg": cl2(d.get("CMPPREVDD_IDX", "0")),
+                        }
+                        break
+            except Exception:
+                continue
+    return result
+
+
+async def fetch_krx_etf_sector(today: str) -> dict:
+    """Fetch ETF data and extract key sector ETFs by name matching."""
+    if not KRX_AUTH_KEY:
+        return {}
+    # Sector keywords to ETF name mapping
+    sector_keywords = {
+        "semiconductor": ["반도체", "IT", "테크"],
+        "defense": ["방산", "항공우주"],
+        "battery": ["2차전지", "배터리", "전기차"],
+        "renewable": ["태양광", "신재생", "그린"],
+        "healthcare": ["헬스케어", "바이오", "제약"],
+        "finance": ["금융", "은행", "증권"],
+    }
+    result = {}
+    headers = {"AUTH_KEY": KRX_AUTH_KEY, "Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            tr = await client.post(
-                "https://openapi.krx.co.kr/contents/COM/GenerateToken.jspx",
-                data={"AUTH_KEY": KRX_AUTH_KEY},
+            r = await client.post(
+                "https://data-dbg.krx.co.kr/svc/apis/etp/etf_bydd_trd",
+                headers=headers,
+                json={"basDd": today},
             )
-            token = tr.json().get("output", {}).get("token", "")
-            if not token:
-                return {}
-            dr = await client.get(
-                "https://openapi.krx.co.kr/contents/SVC/OPP20001",
-                headers={"AUTH_KEY": token},
-                params={"ISU_CD": isin, "BAS_DD": today},
-            )
-            items = dr.json().get("OutBlock_1", [])
-            if items:
-                d = items[0]
-                close_str = d.get("TDD_CLSPRC", "0").replace(",", "")
-                chg_str = d.get("FLUC_RT", "0").replace(",", "")
-                return {
-                    "close": int(close_str),
-                    "chg_pct": float(chg_str),
-                    "volume": d.get("ACC_TRDVOL", "0"),
-                }
+            r.raise_for_status()
+            items = r.json().get("OutBlock_1", [])
+            for d in items:
+                nm = d.get("ISU_NM", "")
+                for sector, keywords in sector_keywords.items():
+                    if any(kw in nm for kw in keywords):
+                        if sector not in result:
+                            def cl(v): return v.replace(",", "").strip() if v else "0"
+                            try:
+                                mktcap = int(cl(d.get("MKTCAP", "0")))
+                            except Exception:
+                                mktcap = 0
+                            result[sector] = {
+                                "name": nm,
+                                "code": d.get("ISU_CD", ""),
+                                "close": cl(d.get("TDD_CLSPRC", "0")),
+                                "chg_pct": cl(d.get("FLUC_RT", "0")),
+                                "mktcap": mktcap,
+                                "nav": cl(d.get("NAV", "0")),
+                            }
+                        break
     except Exception:
         pass
-    return {}
+    return result
 
 
 def build_news_text(news_items: list) -> str:
@@ -417,19 +537,25 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
 
     kr_stocks = analysis.get("kr_market", {}).get("stocks", [])
     today = datetime.now().strftime("%Y%m%d")
-    isin_map = {code: s["isin"] for code, s in KR_STOCKS_BY_CODE.items()}
 
-    prices = {}
+    # Fetch market data in parallel (stocks + indices + ETFs)
+    krx_market, krx_indices, krx_etfs = await asyncio.gather(
+        fetch_krx_market(today),
+        fetch_krx_indices(today),
+        fetch_krx_etf_sector(today),
+    )
+
+    # Match AI-recommended stocks with real KRX data
     for s in kr_stocks:
         code = s.get("code", "")
-        isin = s.get("isin") or isin_map.get(code, "")
-        if isin:
-            prices[code] = await fetch_krx_price(isin, today)
-
-    for s in kr_stocks:
-        pd = prices.get(s.get("code", ""))
-        if pd:
-            s["price_data"] = pd
+        if code and code in krx_market:
+            s["price_data"] = krx_market[code]
+        elif code:
+            # Try ISIN fallback: find by code in market data
+            for mcode, mdata in krx_market.items():
+                if mcode == code or mdata.get("code", "") == code:
+                    s["price_data"] = mdata
+                    break
 
     return {
         "analyzed_at": datetime.now().isoformat(),
@@ -442,6 +568,8 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         },
         "fallback_mode": fallback,
         "analysis": analysis,
+        "market_index": krx_indices,
+        "sector_etfs": krx_etfs,
     }
 
 
