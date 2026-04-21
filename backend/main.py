@@ -345,11 +345,11 @@ def parse_json(text: str) -> dict:
 async def analyze_gemini(prompt: str) -> dict:
     url = (
         "https://generativelanguage.googleapis.com/v1beta"
-        "/models/gemini-1.5-flash:generateContent?key=" + GEMINI_KEY
+        "/models/gemini-2.0-flash:generateContent?key=" + GEMINI_KEY
     )
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 3000},
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4000},
     }
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(url, json=body)
@@ -363,7 +363,7 @@ async def analyze_groq(prompt: str) -> dict:
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
-        "max_tokens": 3000,
+        "max_tokens": 4000,
     }
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
@@ -382,7 +382,7 @@ async def analyze_groq(prompt: str) -> dict:
 async def analyze_claude(prompt: str) -> dict:
     body = {
         "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 3000,
+        "max_tokens": 4000,
         "messages": [{"role": "user", "content": prompt}],
     }
     async with httpx.AsyncClient(timeout=60) as client:
