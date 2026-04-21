@@ -166,131 +166,114 @@ def build_news_text(news_items: list) -> str:
     return text
 
 
-def build_json_schema() -> str:
-    # Short schema: one example per array. AI must fill real values.
-    schema = {
-        "summary": {
-            "headline": "FILL: market summary under 30 chars",
-            "sentiment": "bullish",
-            "score": 50,
-            "market_overview": "FILL: 3 sentence overview in Korean"
-        },
-        "key_issues": [
-            {
-                "category": "person_statement",
-                "person_or_event": "FILL: e.g. Trump",
-                "title": "FILL: issue title in Korean",
-                "detail": "FILL: 3 sentence explanation in Korean",
-                "impact": "positive",
-                "affected_sectors": ["FILL sector1", "FILL sector2"],
-                "news_url": "FILL: actual URL from news list above"
-            }
-        ],
-        "top_news": [
-            {
-                "title": "FILL: Korean title",
-                "url": "FILL: actual URL from news list above",
-                "source": "FILL: media name",
-                "lang": "ko",
-                "impact": "positive",
-                "category": "market",
-                "summary": "FILL: 2-3 sentence Korean summary with investment implication"
-            }
-        ],
-        "us_market": {
-            "outlook": "FILL: 2 sentence US market outlook in Korean",
-            "sectors": [
-                {
-                    "name": "FILL: sector English name",
-                    "name_ko": "FILL: sector Korean name",
-                    "etf": "FILL: ETF ticker",
-                    "strength": 4,
-                    "signal": "buy",
-                    "news_trigger": "FILL: which specific news triggered this",
-                    "reason": "FILL: 2 sentence investment rationale in Korean"
-                }
-            ],
-            "stocks": [
-                {
-                    "ticker": "FILL",
-                    "name": "FILL: company name",
-                    "sector": "FILL: sector name",
-                    "signal": "buy",
-                    "news_trigger": "FILL: which news triggered this",
-                    "reason": "FILL: 2 sentence rationale in Korean",
-                    "risk": "medium"
-                }
-            ]
-        },
-        "kr_market": {
-            "outlook": "FILL: 2 sentence Korean market outlook in Korean",
-            "sectors": [
-                {
-                    "name": "FILL: sector Korean name",
-                    "strength": 4,
-                    "signal": "buy",
-                    "news_trigger": "FILL: which specific news triggered this",
-                    "reason": "FILL: 2 sentence rationale in Korean",
-                    "key_stocks": ["FILL: stock1 name", "FILL: stock2 name"]
-                }
-            ],
-            "stocks": [
-                {
-                    "code": "FILL: 6-digit code",
-                    "isin": "FILL: KR7XXXXXXX000",
-                    "name": "FILL: Korean stock name",
-                    "sector": "FILL: sector name",
-                    "signal": "buy",
-                    "news_trigger": "FILL: which news triggered this",
-                    "reason": "FILL: 2 sentence rationale in Korean",
-                    "risk": "medium",
-                    "target_price": "FILL: number only"
-                }
-            ]
-        },
-        "risks": [
-            {
-                "title": "FILL: risk title in Korean",
-                "detail": "FILL: 2-3 sentence explanation in Korean",
-                "severity": "high",
-                "related_sectors": ["FILL: sector"]
-            }
-        ]
-    }
-    return json.dumps(schema, ensure_ascii=False, indent=2)
-
-
 def build_prompt(news_items: list, hours: int) -> str:
     news_text = build_news_text(news_items)
-    schema = build_json_schema()
     count = len(news_items)
 
+    # Korean stock reference (no Korean string values - use ASCII keys only)
+    kr_ref = (
+        "Samsung Electronics:005930:KR7005930003, "
+        "SK Hynix:000660:KR7000660001, "
+        "Hanwha Aerospace:012450:KR7012450001, "
+        "NAVER:035420:KR7035420009, "
+        "Hyundai Motor:005380:KR7005380001, "
+        "LG Energy Solution:373220:KR7373220003, "
+        "Kakao:035720:KR7035720002, "
+        "POSCO Holdings:005490:KR7005490008, "
+        "KB Financial:105560:KR7105560007, "
+        "Celltrion:068270:KR7068270008, "
+        "LG Chem:051910:KR7051910008, "
+        "Samsung SDI:006400:KR7006400006, "
+        "Hyundai Rotem:064350:KR7064350005, "
+        "LIG Nex1:079550:KR7079550005, "
+        "Korea Aerospace:047810:KR7047810005"
+    )
+
     prompt = (
-        "You are a professional stock market analyst.\n"
-        "TASK: Analyze the real news articles below. Replace every FILL value in the JSON template with actual content.\n"
-        "OUTPUT: Return ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\n"
-        "CRITICAL RULES:\n"
-        "- Every field marked FILL must be replaced with real content from the news articles above.\n"
-        "- top_news: pick 5 most important articles. Use their actual titles and URLs.\n"
-        "- sectors: 2-3 sectors that are DIRECTLY mentioned or implied by the news. Real sector names.\n"
-        "- us_market stocks: 2 real US stocks (NYSE/NASDAQ) linked to the news sectors.\n"
-        "- kr_market stocks: 2 real Korean stocks (KOSPI/KOSDAQ) with correct 6-digit codes.\n"
-        "- news_trigger: quote the specific news headline that caused this recommendation.\n"
-        "- All reason/summary/detail/outlook fields: write in Korean.\n"
-        "- sentiment values: bullish/bearish/neutral only.\n"
-        "- signal values: buy/hold/watch only.\n"
-        "- risk values: low/medium/high only.\n"
-        "- severity values: high/medium/low only.\n"
-        "- score: integer between -100 and 100.\n\n"
-        "KNOWN KOREAN STOCK CODES (use these if relevant):\n"
-        "Samsung Electronics=005930, SK Hynix=000660, Hanwha Aerospace=012450, "
-        "NAVER=035420, Hyundai Motor=005380, LG Energy Solution=373220, "
-        "Kakao=035720, Posco Holdings=005490, KB Financial=105560, "
-        "Celltrion=068270, LG Chem=051910, Samsung SDI=006400\n\n"
-        "NEWS (" + str(count) + " real articles from last " + str(hours) + " hours):\n\n"
+        "You are a professional Korean stock market analyst.\n"
+        "Read the news articles carefully and generate a JSON analysis.\n"
+        "Return ONLY raw JSON. No markdown, no code fences, no explanation text.\n\n"
+
+        "=== OUTPUT FORMAT ===\n"
+        "Generate a JSON object with these exact keys:\n"
+        "summary, key_issues, top_news, us_market, kr_market, risks\n\n"
+
+        "summary: object with keys:\n"
+        "  headline (string, Korean, under 30 chars)\n"
+        "  sentiment (string: bullish OR bearish OR neutral)\n"
+        "  score (integer: -100 to 100)\n"
+        "  market_overview (string, Korean, 3 sentences)\n\n"
+
+        "key_issues: array of 3 to 5 objects, each with keys:\n"
+        "  category (string: person_statement OR economic_indicator OR geopolitics OR commodity OR corporate)\n"
+        "  person_or_event (string: name of person or event)\n"
+        "  title (string, Korean)\n"
+        "  detail (string, Korean, 3 sentences)\n"
+        "  impact (string: positive OR negative OR neutral)\n"
+        "  affected_sectors (array of 2 Korean sector name strings)\n"
+        "  news_url (string: actual URL copied from news list)\n\n"
+
+        "top_news: array of EXACTLY 5 objects, each with keys:\n"
+        "  title (string, Korean translation if English)\n"
+        "  url (string: actual URL from the news list - REQUIRED)\n"
+        "  source (string: media outlet name)\n"
+        "  lang (string: en OR ko)\n"
+        "  impact (string: positive OR negative OR neutral)\n"
+        "  category (string: person_statement OR economic_indicator OR geopolitics OR commodity OR corporate OR market)\n"
+        "  summary (string, Korean, 2-3 sentences including investment implication)\n\n"
+
+        "us_market: object with keys:\n"
+        "  outlook (string, Korean, 2 sentences)\n"
+        "  sectors: array of 2 to 3 objects, each with keys:\n"
+        "    name (string: English sector name)\n"
+        "    name_ko (string: Korean sector name)\n"
+        "    etf (string: representative ETF ticker)\n"
+        "    strength (integer: 1 to 5)\n"
+        "    signal (string: buy OR hold OR watch)\n"
+        "    news_trigger (string: specific news headline that caused this recommendation)\n"
+        "    reason (string, Korean, 2 sentences)\n"
+        "  stocks: array of EXACTLY 2 objects, each with keys:\n"
+        "    ticker (string: real NYSE/NASDAQ ticker)\n"
+        "    name (string: company name)\n"
+        "    sector (string: which sector above)\n"
+        "    signal (string: buy OR hold OR watch)\n"
+        "    news_trigger (string: specific news that triggered this)\n"
+        "    reason (string, Korean, 2 sentences)\n"
+        "    risk (string: low OR medium OR high)\n\n"
+
+        "kr_market: object with keys:\n"
+        "  outlook (string, Korean, 2 sentences)\n"
+        "  sectors: array of 2 to 3 objects, each with keys:\n"
+        "    name (string: Korean sector name)\n"
+        "    strength (integer: 1 to 5)\n"
+        "    signal (string: buy OR hold OR watch)\n"
+        "    news_trigger (string: specific news headline that caused this)\n"
+        "    reason (string, Korean, 2 sentences)\n"
+        "    key_stocks (array of exactly 2 Korean company name strings)\n"
+        "  stocks: array of EXACTLY 2 objects, each with keys:\n"
+        "    code (string: 6-digit KOSPI/KOSDAQ code)\n"
+        "    isin (string: KR7 format ISIN)\n"
+        "    name (string: Korean company name)\n"
+        "    sector (string: Korean sector name from sectors above)\n"
+        "    signal (string: buy OR hold OR watch)\n"
+        "    news_trigger (string: specific news that triggered this)\n"
+        "    reason (string, Korean, 2 sentences)\n"
+        "    risk (string: low OR medium OR high)\n"
+        "    target_price (string: number only, no commas)\n\n"
+
+        "risks: array of 2 to 3 objects, each with keys:\n"
+        "  title (string, Korean)\n"
+        "  detail (string, Korean, 2-3 sentences)\n"
+        "  severity (string: high OR medium OR low)\n"
+        "  related_sectors (array of Korean sector name strings)\n\n"
+
+        "=== KNOWN KOREAN STOCKS (name:code:isin) ===\n"
+        + kr_ref + "\n\n"
+
+        "=== NEWS ARTICLES (" + str(count) + " articles, last " + str(hours) + " hours) ===\n\n"
         + news_text
-        + "\nNow fill the template below with real content from the news above:\n\n"
-        + schema
+        + "\n=== END OF NEWS ===\n"
+        "Now generate the JSON analysis based on the news above:"
     )
     return prompt
 
