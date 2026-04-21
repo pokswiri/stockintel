@@ -51,13 +51,29 @@ KEYWORDS_KO = [
 ]
 
 KR_STOCKS = [
-    {"code": "005930", "isin": "KR7005930003", "name": "Samsung"},
-    {"code": "000660", "isin": "KR7000660001", "name": "SK Hynix"},
-    {"code": "012450", "isin": "KR7012450001", "name": "Hanwha Aerospace"},
-    {"code": "035420", "isin": "KR7035420009", "name": "NAVER"},
-    {"code": "005380", "isin": "KR7005380001", "name": "Hyundai Motor"},
-    {"code": "373220", "isin": "KR7373220003", "name": "LG Energy Solution"},
+    {"code": "005930", "isin": "KR7005930003", "name": "Samsung Electronics", "sector": "semiconductor", "cap": "large"},
+    {"code": "000660", "isin": "KR7000660001", "name": "SK Hynix", "sector": "semiconductor", "cap": "large"},
+    {"code": "042700", "isin": "KR7042700002", "name": "Hanmi Semiconductor", "sector": "semiconductor", "cap": "mid"},
+    {"code": "240810", "isin": "KR7240810006", "name": "Wonik IPS", "sector": "semiconductor", "cap": "mid"},
+    {"code": "012450", "isin": "KR7012450001", "name": "Hanwha Aerospace", "sector": "defense", "cap": "large"},
+    {"code": "079550", "isin": "KR7079550005", "name": "LIG Nex1", "sector": "defense", "cap": "mid"},
+    {"code": "047810", "isin": "KR7047810005", "name": "Korea Aerospace Industries", "sector": "defense", "cap": "large"},
+    {"code": "064350", "isin": "KR7064350005", "name": "Hyundai Rotem", "sector": "defense", "cap": "mid"},
+    {"code": "035420", "isin": "KR7035420009", "name": "NAVER", "sector": "ai_platform", "cap": "large"},
+    {"code": "035720", "isin": "KR7035720002", "name": "Kakao", "sector": "ai_platform", "cap": "large"},
+    {"code": "005380", "isin": "KR7005380001", "name": "Hyundai Motor", "sector": "auto_ev", "cap": "large"},
+    {"code": "000270", "isin": "KR7000270009", "name": "Kia", "sector": "auto_ev", "cap": "large"},
+    {"code": "373220", "isin": "KR7373220003", "name": "LG Energy Solution", "sector": "battery", "cap": "large"},
+    {"code": "006400", "isin": "KR7006400006", "name": "Samsung SDI", "sector": "battery", "cap": "large"},
+    {"code": "051910", "isin": "KR7051910008", "name": "LG Chem", "sector": "battery", "cap": "large"},
+    {"code": "009830", "isin": "KR7009830001", "name": "Hanwha Solutions", "sector": "renewable", "cap": "large"},
+    {"code": "105560", "isin": "KR7105560007", "name": "KB Financial", "sector": "finance", "cap": "large"},
+    {"code": "055550", "isin": "KR7055550008", "name": "Shinhan Financial", "sector": "finance", "cap": "large"},
+    {"code": "068270", "isin": "KR7068270008", "name": "Celltrion", "sector": "healthcare", "cap": "large"},
+    {"code": "207940", "isin": "KR7207940008", "name": "Samsung Biologics", "sector": "healthcare", "cap": "large"},
+    {"code": "005490", "isin": "KR7005490008", "name": "POSCO Holdings", "sector": "steel", "cap": "large"},
 ]
+KR_STOCKS_BY_CODE = {s["code"]: s for s in KR_STOCKS}
 
 
 async def fetch_google_news(hours: int) -> list:
@@ -121,6 +137,25 @@ async def fetch_naver_news() -> list:
     return results
 
 
+def dedup_news(news_list: list) -> list:
+    seen_urls = set()
+    seen_titles = set()
+    result = []
+    for item in news_list:
+        url = item.get("link", "")
+        title = item.get("title", "").strip()[:50]
+        if url and url in seen_urls:
+            continue
+        if title and title in seen_titles:
+            continue
+        if url:
+            seen_urls.add(url)
+        if title:
+            seen_titles.add(title)
+        result.append(item)
+    return result
+
+
 async def fetch_krx_price(isin: str, today: str) -> dict:
     if not KRX_AUTH_KEY:
         return {}
@@ -170,23 +205,38 @@ def build_prompt(news_items: list, hours: int) -> str:
     news_text = build_news_text(news_items)
     count = len(news_items)
 
-    # Korean stock reference (no Korean string values - use ASCII keys only)
+    # Sector-based stock reference: name:code:isin:cap(large/mid)
     kr_ref = (
-        "Samsung Electronics:005930:KR7005930003, "
-        "SK Hynix:000660:KR7000660001, "
-        "Hanwha Aerospace:012450:KR7012450001, "
-        "NAVER:035420:KR7035420009, "
-        "Hyundai Motor:005380:KR7005380001, "
-        "LG Energy Solution:373220:KR7373220003, "
-        "Kakao:035720:KR7035720002, "
-        "POSCO Holdings:005490:KR7005490008, "
-        "KB Financial:105560:KR7105560007, "
-        "Celltrion:068270:KR7068270008, "
-        "LG Chem:051910:KR7051910008, "
-        "Samsung SDI:006400:KR7006400006, "
-        "Hyundai Rotem:064350:KR7064350005, "
-        "LIG Nex1:079550:KR7079550005, "
-        "Korea Aerospace:047810:KR7047810005"
+        "=SEMICONDUCTOR= "
+        "Samsung Electronics:005930:KR7005930003:large, "
+        "SK Hynix:000660:KR7000660001:large, "
+        "Hanmi Semiconductor:042700:KR7042700002:mid, "
+        "Wonik IPS:240810:KR7240810006:mid "
+        "=DEFENSE= "
+        "Hanwha Aerospace:012450:KR7012450001:large, "
+        "LIG Nex1:079550:KR7079550005:mid, "
+        "Korea Aerospace:047810:KR7047810005:large, "
+        "Hyundai Rotem:064350:KR7064350005:mid "
+        "=AI/PLATFORM= "
+        "NAVER:035420:KR7035420009:large, "
+        "Kakao:035720:KR7035720002:large "
+        "=AUTO/EV= "
+        "Hyundai Motor:005380:KR7005380001:large, "
+        "Kia:000270:KR7000270009:large "
+        "=BATTERY= "
+        "LG Energy Solution:373220:KR7373220003:large, "
+        "Samsung SDI:006400:KR7006400006:large, "
+        "LG Chem:051910:KR7051910008:large "
+        "=RENEWABLE= "
+        "Hanwha Solutions:009830:KR7009830001:large "
+        "=FINANCE= "
+        "KB Financial:105560:KR7105560007:large, "
+        "Shinhan Financial:055550:KR7055550008:large "
+        "=HEALTHCARE= "
+        "Celltrion:068270:KR7068270008:large, "
+        "Samsung Biologics:207940:KR7207940008:large "
+        "=STEEL= "
+        "POSCO Holdings:005490:KR7005490008:large"
     )
 
     prompt = (
@@ -247,17 +297,21 @@ def build_prompt(news_items: list, hours: int) -> str:
         "    name (string: Korean sector name)\n"
         "    strength (integer: 1 to 5)\n"
         "    signal (string: buy OR hold OR watch)\n"
-        "    news_trigger (string: specific news headline that caused this)\n"
-        "    reason (string, Korean, 2 sentences)\n"
-        "    key_stocks (array of exactly 2 Korean company name strings)\n"
-        "  stocks: array of EXACTLY 2 objects, each with keys:\n"
-        "    code (string: 6-digit KOSPI/KOSDAQ code)\n"
-        "    isin (string: KR7 format ISIN)\n"
-        "    name (string: Korean company name)\n"
+        "    news_trigger (string: ONE specific news headline from the news list that directly caused this sector recommendation)\n"
+        "    reason (string, Korean, 2 sentences explaining the news-to-sector connection)\n"
+        "    key_stocks (array of exactly 2 Korean company name strings: first=large cap leader, second=mid cap)\n"
+        "  stocks: array of EXACTLY 2 objects picked from KNOWN KOREAN STOCKS list above.\n"
+        "    IMPORTANT: stock[0] must be the large-cap leader of the top recommended sector.\n"
+        "    IMPORTANT: stock[1] must be a mid-cap stock from the same or second sector.\n"
+        "    IMPORTANT: Do NOT always pick Samsung/SK Hynix. Choose based on which sector the news points to.\n"
+        "    Each stock object has these keys:\n"
+        "    code (string: 6-digit code from KNOWN KOREAN STOCKS)\n"
+        "    isin (string: KR7 format ISIN from KNOWN KOREAN STOCKS)\n"
+        "    name (string: company name from KNOWN KOREAN STOCKS)\n"
         "    sector (string: Korean sector name from sectors above)\n"
         "    signal (string: buy OR hold OR watch)\n"
-        "    news_trigger (string: specific news that triggered this)\n"
-        "    reason (string, Korean, 2 sentences)\n"
+        "    news_trigger (string: ONE specific news headline that triggered this stock pick)\n"
+        "    reason (string, Korean, 2 sentences: explain why THIS stock in THIS sector based on the news)\n"
         "    risk (string: low OR medium OR high)\n"
         "    target_price (string: number only, no commas)\n\n"
 
@@ -377,14 +431,14 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         fetch_google_news(hours),
         fetch_naver_news(),
     )
-    all_news = google_news + naver_news
+    all_news = dedup_news(google_news + naver_news)
     fallback = len(all_news) == 0
 
     analysis, ai_engine = await run_analysis(all_news, hours)
 
     kr_stocks = analysis.get("kr_market", {}).get("stocks", [])
     today = datetime.now().strftime("%Y%m%d")
-    isin_map = {s["code"]: s["isin"] for s in KR_STOCKS}
+    isin_map = {code: s["isin"] for code, s in KR_STOCKS_BY_CODE.items()}
 
     prices = {}
     for s in kr_stocks:
