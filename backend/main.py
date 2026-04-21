@@ -167,168 +167,93 @@ def build_news_text(news_items: list) -> str:
 
 
 def build_json_schema() -> str:
-    # RULE: top_news exactly 5, sectors max 3, stocks max 2 per market
-    # RULE: each sector must have exactly 2 stocks in key_stocks
-    # RULE: stocks array max 2 items (most impactful only)
+    # Short schema: one example per array. AI must fill real values.
     schema = {
         "summary": {
-            "headline": "market summary under 30 chars",
-            "sentiment": "bullish or bearish or neutral",
-            "score": 0,
-            "market_overview": "3 sentence overview"
+            "headline": "FILL: market summary under 30 chars",
+            "sentiment": "bullish",
+            "score": 50,
+            "market_overview": "FILL: 3 sentence overview in Korean"
         },
         "key_issues": [
             {
-                "category": "person_statement or economic_indicator or geopolitics or commodity or corporate",
-                "person_or_event": "Trump or Powell or Jensen Huang etc",
-                "title": "issue title",
-                "detail": "3 sentence explanation",
-                "impact": "positive or negative or neutral",
-                "affected_sectors": ["sector1", "sector2"],
-                "news_url": "actual URL from news list"
+                "category": "person_statement",
+                "person_or_event": "FILL: e.g. Trump",
+                "title": "FILL: issue title in Korean",
+                "detail": "FILL: 3 sentence explanation in Korean",
+                "impact": "positive",
+                "affected_sectors": ["FILL sector1", "FILL sector2"],
+                "news_url": "FILL: actual URL from news list above"
             }
         ],
         "top_news": [
             {
-                "title": "news title (translate to Korean if English)",
-                "url": "REQUIRED: actual URL from news list",
-                "source": "media name",
-                "lang": "en or ko",
-                "impact": "positive or negative or neutral",
-                "category": "person_statement or economic_indicator or geopolitics or commodity or corporate or market",
-                "summary": "2-3 sentence Korean summary. Include investment implication."
-            },
-            {
-                "title": "news title 2",
-                "url": "actual URL",
-                "source": "media name",
-                "lang": "en or ko",
-                "impact": "positive or negative or neutral",
-                "category": "category",
-                "summary": "2-3 sentence Korean summary"
-            },
-            {
-                "title": "news title 3",
-                "url": "actual URL",
-                "source": "media name",
-                "lang": "en or ko",
-                "impact": "positive or negative or neutral",
-                "category": "category",
-                "summary": "2-3 sentence Korean summary"
-            },
-            {
-                "title": "news title 4",
-                "url": "actual URL",
-                "source": "media name",
-                "lang": "en or ko",
-                "impact": "positive or negative or neutral",
-                "category": "category",
-                "summary": "2-3 sentence Korean summary"
-            },
-            {
-                "title": "news title 5",
-                "url": "actual URL",
-                "source": "media name",
-                "lang": "en or ko",
-                "impact": "positive or negative or neutral",
-                "category": "category",
-                "summary": "2-3 sentence Korean summary"
+                "title": "FILL: Korean title",
+                "url": "FILL: actual URL from news list above",
+                "source": "FILL: media name",
+                "lang": "ko",
+                "impact": "positive",
+                "category": "market",
+                "summary": "FILL: 2-3 sentence Korean summary with investment implication"
             }
         ],
         "us_market": {
-            "outlook": "2 sentence US market outlook in Korean",
+            "outlook": "FILL: 2 sentence US market outlook in Korean",
             "sectors": [
                 {
-                    "name": "sector english name",
-                    "name_ko": "sector Korean name",
-                    "etf": "ETF ticker",
+                    "name": "FILL: sector English name",
+                    "name_ko": "FILL: sector Korean name",
+                    "etf": "FILL: ETF ticker",
                     "strength": 4,
-                    "signal": "buy or hold or watch",
-                    "news_trigger": "one line: which news triggered this recommendation",
-                    "reason": "2 sentence investment rationale in Korean"
-                },
-                {
-                    "name": "sector2 english name",
-                    "name_ko": "sector2 Korean name",
-                    "etf": "ETF2 ticker",
-                    "strength": 3,
-                    "signal": "buy or hold or watch",
-                    "news_trigger": "one line news trigger",
-                    "reason": "2 sentence rationale in Korean"
+                    "signal": "buy",
+                    "news_trigger": "FILL: which specific news triggered this",
+                    "reason": "FILL: 2 sentence investment rationale in Korean"
                 }
             ],
             "stocks": [
                 {
-                    "ticker": "TICKER1",
-                    "name": "company name",
-                    "sector": "which sector above",
-                    "signal": "buy or hold or watch",
-                    "news_trigger": "one line news trigger",
-                    "reason": "2 sentence rationale in Korean",
-                    "risk": "low or medium or high"
-                },
-                {
-                    "ticker": "TICKER2",
-                    "name": "company name 2",
-                    "sector": "which sector above",
-                    "signal": "buy or hold or watch",
-                    "news_trigger": "one line news trigger",
-                    "reason": "2 sentence rationale in Korean",
-                    "risk": "low or medium or high"
+                    "ticker": "FILL",
+                    "name": "FILL: company name",
+                    "sector": "FILL: sector name",
+                    "signal": "buy",
+                    "news_trigger": "FILL: which news triggered this",
+                    "reason": "FILL: 2 sentence rationale in Korean",
+                    "risk": "medium"
                 }
             ]
         },
         "kr_market": {
-            "outlook": "2 sentence Korean market outlook in Korean",
+            "outlook": "FILL: 2 sentence Korean market outlook in Korean",
             "sectors": [
                 {
-                    "name": "sector Korean name",
+                    "name": "FILL: sector Korean name",
                     "strength": 4,
-                    "signal": "buy or hold or watch",
-                    "news_trigger": "one line: which news triggered this",
-                    "reason": "2 sentence rationale in Korean",
-                    "key_stocks": ["stock name 1", "stock name 2"]
-                },
-                {
-                    "name": "sector2 Korean name",
-                    "strength": 3,
-                    "signal": "buy or hold or watch",
-                    "news_trigger": "one line news trigger",
-                    "reason": "2 sentence rationale in Korean",
-                    "key_stocks": ["stock name 3", "stock name 4"]
+                    "signal": "buy",
+                    "news_trigger": "FILL: which specific news triggered this",
+                    "reason": "FILL: 2 sentence rationale in Korean",
+                    "key_stocks": ["FILL: stock1 name", "FILL: stock2 name"]
                 }
             ],
             "stocks": [
                 {
-                    "code": "005930",
-                    "isin": "KR7005930003",
-                    "name": "Korean stock name",
-                    "sector": "which sector above",
-                    "signal": "buy or hold or watch",
-                    "news_trigger": "one line news trigger",
-                    "reason": "2 sentence rationale in Korean",
-                    "risk": "low or medium or high",
-                    "target_price": "150000"
-                },
-                {
-                    "code": "000660",
-                    "isin": "KR7000660001",
-                    "name": "Korean stock name 2",
-                    "sector": "which sector above",
-                    "signal": "buy or hold or watch",
-                    "news_trigger": "one line news trigger",
-                    "reason": "2 sentence rationale in Korean",
-                    "risk": "low or medium or high",
-                    "target_price": "120000"
+                    "code": "FILL: 6-digit code",
+                    "isin": "FILL: KR7XXXXXXX000",
+                    "name": "FILL: Korean stock name",
+                    "sector": "FILL: sector name",
+                    "signal": "buy",
+                    "news_trigger": "FILL: which news triggered this",
+                    "reason": "FILL: 2 sentence rationale in Korean",
+                    "risk": "medium",
+                    "target_price": "FILL: number only"
                 }
             ]
         },
         "risks": [
             {
-                "title": "risk title in Korean",
-                "detail": "2-3 sentence explanation in Korean",
-                "severity": "high or medium or low",
-                "related_sectors": ["sector1"]
+                "title": "FILL: risk title in Korean",
+                "detail": "FILL: 2-3 sentence explanation in Korean",
+                "severity": "high",
+                "related_sectors": ["FILL: sector"]
             }
         ]
     }
@@ -341,26 +266,30 @@ def build_prompt(news_items: list, hours: int) -> str:
     count = len(news_items)
 
     prompt = (
-        "You are a professional stock market analyst. Analyze the news below and respond ONLY with valid JSON.\n"
-        "NO text before or after JSON. NO markdown. NO code blocks.\n\n"
-        "STRICT COUNT RULES (must follow exactly):\n"
-        "- top_news: EXACTLY 5 items. Pick the 5 most impactful news.\n"
-        "- us_market.sectors: 2 to 3 items maximum. Only sectors clearly supported by news.\n"
-        "- us_market.stocks: EXACTLY 2 items. One per top sector.\n"
-        "- kr_market.sectors: 2 to 3 items maximum. Only sectors clearly supported by news.\n"
-        "- kr_market.stocks: EXACTLY 2 items. Real KOSPI/KOSDAQ stocks with 6-digit codes.\n"
-        "- key_issues: 3 to 5 items. Each must link to a news URL.\n"
-        "- risks: 2 to 3 items.\n\n"
-        "ANALYSIS RULES:\n"
-        "1. Extract key issues by person (Trump/Powell/Jensen Huang/Musk), economic indicators, geopolitics, commodities.\n"
-        "2. For each sector recommendation, cite the specific news that triggered it in news_trigger field.\n"
-        "3. Korean stocks must be real KOSPI/KOSDAQ listed companies with correct 6-digit codes.\n"
-        "4. sentiment: bullish/bearish/neutral only. score: integer -100 to 100.\n"
-        "5. signal: buy/hold/watch only. risk: low/medium/high only.\n"
-        "6. All explanatory text (reason, summary, detail, outlook) must be in Korean.\n\n"
-        "NEWS (" + str(count) + " articles, last " + str(hours) + " hours):\n\n"
+        "You are a professional stock market analyst.\n"
+        "TASK: Analyze the real news articles below. Replace every FILL value in the JSON template with actual content.\n"
+        "OUTPUT: Return ONLY valid JSON. No text before or after. No markdown. No code blocks.\n\n"
+        "CRITICAL RULES:\n"
+        "- Every field marked FILL must be replaced with real content from the news articles above.\n"
+        "- top_news: pick 5 most important articles. Use their actual titles and URLs.\n"
+        "- sectors: 2-3 sectors that are DIRECTLY mentioned or implied by the news. Real sector names.\n"
+        "- us_market stocks: 2 real US stocks (NYSE/NASDAQ) linked to the news sectors.\n"
+        "- kr_market stocks: 2 real Korean stocks (KOSPI/KOSDAQ) with correct 6-digit codes.\n"
+        "- news_trigger: quote the specific news headline that caused this recommendation.\n"
+        "- All reason/summary/detail/outlook fields: write in Korean.\n"
+        "- sentiment values: bullish/bearish/neutral only.\n"
+        "- signal values: buy/hold/watch only.\n"
+        "- risk values: low/medium/high only.\n"
+        "- severity values: high/medium/low only.\n"
+        "- score: integer between -100 and 100.\n\n"
+        "KNOWN KOREAN STOCK CODES (use these if relevant):\n"
+        "Samsung Electronics=005930, SK Hynix=000660, Hanwha Aerospace=012450, "
+        "NAVER=035420, Hyundai Motor=005380, LG Energy Solution=373220, "
+        "Kakao=035720, Posco Holdings=005490, KB Financial=105560, "
+        "Celltrion=068270, LG Chem=051910, Samsung SDI=006400\n\n"
+        "NEWS (" + str(count) + " real articles from last " + str(hours) + " hours):\n\n"
         + news_text
-        + "\n\nRespond with this exact JSON structure:\n"
+        + "\nNow fill the template below with real content from the news above:\n\n"
         + schema
     )
     return prompt
