@@ -82,7 +82,7 @@ async def fetch_google_news(hours: int) -> list:
     date_restrict = "d" + str(max(1, hours // 24))
     results = []
     async with httpx.AsyncClient(timeout=12) as client:
-        for kw in KEYWORDS_EN[:8]:
+        for kw in KEYWORDS_EN[:5]:
             try:
                 r = await client.get(
                     "https://www.googleapis.com/customsearch/v1",
@@ -117,12 +117,12 @@ async def fetch_naver_news() -> list:
         "X-Naver-Client-Secret": NAVER_SECRET,
     }
     async with httpx.AsyncClient(timeout=12) as client:
-        for kw in KEYWORDS_KO[:8]:
+        for kw in KEYWORDS_KO[:5]:
             try:
                 r = await client.get(
                     "https://openapi.naver.com/v1/search/news.json",
                     headers=headers,
-                    params={"query": kw, "display": 8, "sort": "date"},
+                    params={"query": kw, "display": 5, "sort": "date"},
                 )
                 for item in r.json().get("items", []):
                     results.append({
@@ -190,11 +190,11 @@ async def fetch_krx_price(isin: str, today: str) -> dict:
 
 def build_news_text(news_items: list) -> str:
     text = ""
-    for i, item in enumerate(news_items[:50], 1):
+    for i, item in enumerate(news_items[:30], 1):
         lang = "[EN]" if item.get("lang") == "en" else "[KO]"
         text += str(i) + ". " + lang + " " + item.get("title", "") + "\n"
         if item.get("snippet"):
-            text += "   " + item["snippet"][:150] + "\n"
+            text += "   " + item["snippet"][:100] + "\n"
         if item.get("link"):
             text += "   URL: " + item["link"] + "\n"
         text += "\n"
@@ -207,36 +207,15 @@ def build_prompt(news_items: list, hours: int) -> str:
 
     # Sector-based stock reference: name:code:isin:cap(large/mid)
     kr_ref = (
-        "=SEMICONDUCTOR= "
-        "Samsung Electronics:005930:KR7005930003:large, "
-        "SK Hynix:000660:KR7000660001:large, "
-        "Hanmi Semiconductor:042700:KR7042700002:mid, "
-        "Wonik IPS:240810:KR7240810006:mid "
-        "=DEFENSE= "
-        "Hanwha Aerospace:012450:KR7012450001:large, "
-        "LIG Nex1:079550:KR7079550005:mid, "
-        "Korea Aerospace:047810:KR7047810005:large, "
-        "Hyundai Rotem:064350:KR7064350005:mid "
-        "=AI/PLATFORM= "
-        "NAVER:035420:KR7035420009:large, "
-        "Kakao:035720:KR7035720002:large "
-        "=AUTO/EV= "
-        "Hyundai Motor:005380:KR7005380001:large, "
-        "Kia:000270:KR7000270009:large "
-        "=BATTERY= "
-        "LG Energy Solution:373220:KR7373220003:large, "
-        "Samsung SDI:006400:KR7006400006:large, "
-        "LG Chem:051910:KR7051910008:large "
-        "=RENEWABLE= "
-        "Hanwha Solutions:009830:KR7009830001:large "
-        "=FINANCE= "
-        "KB Financial:105560:KR7105560007:large, "
-        "Shinhan Financial:055550:KR7055550008:large "
-        "=HEALTHCARE= "
-        "Celltrion:068270:KR7068270008:large, "
-        "Samsung Biologics:207940:KR7207940008:large "
-        "=STEEL= "
-        "POSCO Holdings:005490:KR7005490008:large"
+        "SEMICONDUCTOR:Samsung Electronics:005930:large,SK Hynix:000660:large,Hanmi Semiconductor:042700:mid|"
+        "DEFENSE:Hanwha Aerospace:012450:large,LIG Nex1:079550:mid,Korea Aerospace:047810:large|"
+        "AI_PLATFORM:NAVER:035420:large,Kakao:035720:large|"
+        "AUTO_EV:Hyundai Motor:005380:large,Kia:000270:large|"
+        "BATTERY:LG Energy Solution:373220:large,Samsung SDI:006400:large,LG Chem:051910:large|"
+        "RENEWABLE:Hanwha Solutions:009830:large|"
+        "FINANCE:KB Financial:105560:large,Shinhan Financial:055550:large|"
+        "HEALTHCARE:Celltrion:068270:large,Samsung Biologics:207940:large|"
+        "STEEL:POSCO Holdings:005490:large"
     )
 
     prompt = (
