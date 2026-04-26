@@ -164,25 +164,35 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
         except Exception as e:
             errors.append({"code": code, "error": str(e)})
 
-    # ── 7. HIGH 우선, 없으면 MID 관심 종목으로 별도 반환 ──
+    # ── 7. HIGH 우선 + MID(60점↑) 보충으로 최대 top_n개 ──
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
 
     high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
+    # MID 중 60점 이상만 보충 대상 (품질 최저선)
+    mid_qual  = [s for s in scored if s["nexus"]["grade"] == "MID"
+                 and s["nexus"]["total"] >= 60]
     mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
     low_list  = [s for s in scored if s["nexus"]["grade"] == "LOW"]
 
-    # HIGH만 최대 top_n개
-    final_top = high_list[:top_n]
+    # HIGH 우선 채우고 부족하면 MID(60점↑)로 보충
+    final_top = list(high_list[:top_n])
+    if len(final_top) < top_n:
+        needed = top_n - len(final_top)
+        # 이미 포함된 종목 제외하고 MID 보충
+        top_codes = {s["code"] for s in final_top}
+        supplement = [s for s in mid_qual if s["code"] not in top_codes]
+        final_top += supplement[:needed]
 
-    # MID 관심 종목: HIGH가 top_n 미만일 때만, 최대 3개
-    # 프론트에서 HIGH와 구분해서 "관심 종목" 섹션으로 표시
-    watch_list = mid_list[:3] if len(high_list) < top_n else []
+    # 각 항목에 표시 등급 태그 추가 (프론트 구분용)
+    for s in final_top:
+        s["display_grade"] = s["nexus"]["grade"]  # HIGH or MID
 
     # 통계 정보
     grade_counts = {
-        "HIGH": len(high_list),
-        "MID":  len(mid_list),
-        "LOW":  len(low_list),
+        "HIGH":     len(high_list),
+        "MID":      len(mid_list),
+        "MID_QUAL": len(mid_qual),   # 60점↑ MID 수
+        "LOW":      len(low_list),
     }
 
     return {
@@ -193,8 +203,7 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
         "anchor_sectors":   ANCHOR_SECTORS,
         "market_open":      market_open,
         "grade_counts":     grade_counts,
-        "top":              final_top,   # HIGH 등급만
-        "watch":            watch_list,  # MID 관심 종목 (HIGH 없을 때)
+        "top":              final_top,  # HIGH 우선 + MID(60↑) 보충
         "all":              scored,
         "errors":           errors,
     }
