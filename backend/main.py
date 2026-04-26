@@ -597,18 +597,23 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
     kr_sectors = analysis.get("kr_market", {}).get("sectors", [])
     sector_names = [s.get("name", "") for s in kr_sectors if s.get("name")]
 
-    # 4. KRX 시장 데이터로 AI 추천 종목 주가 보완
-    krx_market = {}
-    try:
-        krx_market = await fetch_krx_market(today)
-    except Exception:
-        pass
-
+    # 4. AI 추천 종목 주가 KIS API로 직접 조회
     kr_stocks = analysis.get("kr_market", {}).get("stocks", [])
-    for s in kr_stocks:
-        code = s.get("code", "")
-        if code and code in krx_market:
-            s["price_data"] = krx_market[code]
+    if is_kis_available() and kr_stocks:
+        try:
+            from kis_official import batch_fetch_prices as _bfp
+            ai_codes = [s.get("code","") for s in kr_stocks if s.get("code","")]
+            ai_prices = await _bfp(ai_codes)
+            for s in kr_stocks:
+                code = s.get("code", "")
+                if code and code in ai_prices:
+                    pd = ai_prices[code]
+                    s["price_data"] = {
+                        "close":   pd.get("price", 0),
+                        "chg_pct": pd.get("change_rate", 0),
+                    }
+        except Exception:
+            pass
 
     # 5. NEXUS Score + 섹터 ETF/업종지수 실시간 (KIS API)
     nexus_result = None

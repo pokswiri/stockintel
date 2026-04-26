@@ -164,32 +164,22 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
         except Exception as e:
             errors.append({"code": code, "error": str(e)})
 
-    # ── 7. HIGH 우선 선발 ────────────────────────────────
+    # ── 7. HIGH만 선발 (MID·LOW 표시 안 함) ─────────────
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
 
     high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
     mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
+    low_list  = [s for s in scored if s["nexus"]["grade"] == "LOW"]
 
-    # HIGH를 최대 top_n개까지
-    # HIGH 부족 시 MID로 보충 (단, HIGH가 1개도 없으면 MID도 표시 안 함)
-    if len(high_list) >= 1:
-        final_top = high_list[:top_n]
-        # HIGH가 top_n보다 적으면 MID 상위로 채움
-        if len(final_top) < top_n:
-            needed = top_n - len(final_top)
-            final_top += mid_list[:needed]
-    else:
-        # HIGH가 하나도 없으면 빈 결과 (LOW는 절대 표시 안 함)
-        final_top = []
+    # HIGH만 최대 top_n개 표시
+    # HIGH 없으면 빈 결과 → 프론트에서 "조건 충족 종목 없음" 표시
+    final_top = high_list[:top_n]
 
-    # 최종 점수순 정렬
-    final_top.sort(key=lambda x: x["nexus"]["total"], reverse=True)
-
-    # 통계 정보
+    # 통계 정보 (전체 현황 파악용)
     grade_counts = {
         "HIGH": len(high_list),
         "MID":  len(mid_list),
-        "LOW":  len(scored) - len(high_list) - len(mid_list),
+        "LOW":  len(low_list),
     }
 
     return {
