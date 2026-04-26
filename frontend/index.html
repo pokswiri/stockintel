@@ -398,7 +398,7 @@ function render(data){
   // API badges
   const eng={gemini:'Gemini',groq:'Groq',claude:'Claude'}[data.ai_engine]||'AI';
   document.getElementById('apis').innerHTML=
-    [{l:eng+' AI',on:true},{l:'Google',on:h.google},{l:'Naver',on:h.naver},{l:'KRX',on:h.krx}]
+    [{l:eng+' AI',on:true},{l:'KIS',on:data.kis_available},{l:'Google',on:h.google},{l:'Naver',on:h.naver}]
     .map(x=>`<div class="ab ${x.on?'on':'off'}"><div class="ab-d"></div>${x.l}</div>`).join('');
 
   // Banner
@@ -414,12 +414,39 @@ function render(data){
   const gf=document.getElementById('g-fill');gf.style.width=pct+'%';gf.style.background=col;
   const gs=document.getElementById('g-sc');gs.textContent=(sc2>0?'+':'')+sc2;gs.style.color=col;
 
-  // Index strip
-  const mi=data.market_index||{},etfs=data.sector_etfs||{};
-  let ih='';
-  ['kospi','kosdaq'].forEach(k=>{const d=mi[k];if(!d)return;const c=parseFloat(d.chg_pct||0);const cls=c>0?'up':c<0?'dn':'neut';ih+=`<div class="ic"><span class="ic-n">${d.name||k.toUpperCase()}</span><span class="ic-v ${cls}">${parseFloat(d.close||0).toLocaleString()}</span><span class="ic-c ${cls}">${c>0?'+':''}${c.toFixed(2)}%</span></div>`});
-  Object.values(etfs).slice(0,3).forEach(e=>{if(!e)return;const c=parseFloat(e.chg_pct||0);const cls=c>0?'up':c<0?'dn':'neut';ih+=`<div class="ic"><span class="ic-n">${(e.name||'').slice(0,9)}</span><span class="ic-c ${cls}">${c>0?'+':''}${c.toFixed(2)}%</span></div>`});
-  document.getElementById('idx').innerHTML=ih;
+  // Index strip — KIS 실시간 지수 + 섹터 ETF
+  const mi = data.market_index || {};
+  const etfsLive = data.sector_etfs_live || {};
+  const secIdx   = data.sector_indices_live || {};
+  let ih = '';
+
+  // 코스피·코스닥·코스피200
+  ['kospi','kosdaq','kospi200'].forEach(k => {
+    const d = mi[k]; if (!d || !d.close) return;
+    const c = parseFloat(d.chg_pct || 0);
+    const cls = c > 0 ? 'up' : c < 0 ? 'dn' : 'neut';
+    const label = k === 'kospi200' ? 'KP200' : d.name || k.toUpperCase();
+    ih += `<div class="ic">
+      <span class="ic-n">${label}</span>
+      <span class="ic-v ${cls}">${parseFloat(d.close).toLocaleString()}</span>
+      <span class="ic-c ${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}%</span>
+    </div>`;
+  });
+
+  // 섹터 ETF 실시간
+  const sectorLabel = {semiconductor:'반도체ETF', defense:'방산ETF', battery:'2차전지ETF', healthcare:'바이오ETF', finance:'금융ETF', auto_ev:'자동차ETF', renewable:'신재생ETF', ai_platform:'인터넷ETF'};
+  Object.entries(etfsLive).slice(0, 4).forEach(([sk, e]) => {
+    if (!e || !e.price) return;
+    const c = parseFloat(e.chg_pct || 0);
+    const cls = c > 0 ? 'up' : c < 0 ? 'dn' : 'neut';
+    ih += `<div class="ic">
+      <span class="ic-n">${sectorLabel[sk] || sk}</span>
+      <span class="ic-v ${cls}">${parseFloat(e.price).toLocaleString()}</span>
+      <span class="ic-c ${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}%</span>
+    </div>`;
+  });
+
+  document.getElementById('idx').innerHTML = ih || '<div style="color:var(--txt3);font-size:11px;padding:6px 0">장외시간 — 전일 기준</div>';
 
   // Issues
   document.getElementById('issues').innerHTML=(a.key_issues||[]).map(ev=>{
