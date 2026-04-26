@@ -164,18 +164,21 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
         except Exception as e:
             errors.append({"code": code, "error": str(e)})
 
-    # ── 7. HIGH만 선발 (MID·LOW 표시 안 함) ─────────────
+    # ── 7. HIGH 우선, 없으면 MID 관심 종목으로 별도 반환 ──
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
 
     high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
     mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
     low_list  = [s for s in scored if s["nexus"]["grade"] == "LOW"]
 
-    # HIGH만 최대 top_n개 표시
-    # HIGH 없으면 빈 결과 → 프론트에서 "조건 충족 종목 없음" 표시
+    # HIGH만 최대 top_n개
     final_top = high_list[:top_n]
 
-    # 통계 정보 (전체 현황 파악용)
+    # MID 관심 종목: HIGH가 top_n 미만일 때만, 최대 3개
+    # 프론트에서 HIGH와 구분해서 "관심 종목" 섹션으로 표시
+    watch_list = mid_list[:3] if len(high_list) < top_n else []
+
+    # 통계 정보
     grade_counts = {
         "HIGH": len(high_list),
         "MID":  len(mid_list),
@@ -190,7 +193,8 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
         "anchor_sectors":   ANCHOR_SECTORS,
         "market_open":      market_open,
         "grade_counts":     grade_counts,
-        "top":              final_top,
+        "top":              final_top,   # HIGH 등급만
+        "watch":            watch_list,  # MID 관심 종목 (HIGH 없을 때)
         "all":              scored,
         "errors":           errors,
     }

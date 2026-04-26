@@ -68,14 +68,16 @@ KEYWORDS_EN = [
 ]
 
 KEYWORDS_KO = [
-    "트럼프 관세 무역",
-    "연준 파월 금리",
-    "삼성전자 반도체 HBM",
-    "SK하이닉스 실적 주가",
-    "코스피 외국인 순매수",
-    "원달러 환율",
-    "한국은행 기준금리",
-    "젠슨황 엔비디아 AI",
+    "코스피 코스닥 주식 시장",          # 시장 전반
+    "트럼프 관세 무역 한국",             # 지정학
+    "연준 파월 금리 FOMC",              # 통화정책
+    "삼성전자 SK하이닉스 반도체 실적",   # 반도체
+    "외국인 기관 순매수 순매도",         # 수급
+    "방산 한화에어로 현대로템 수주",      # 방산
+    "바이오 제약 임상 FDA 승인",         # 헬스케어
+    "현대차 기아 자동차 실적 판매",      # 자동차 (실적 정확히 반영)
+    "이차전지 배터리 양극재",           # 배터리
+    "환율 원달러 외환",                 # 환율
 ]
 
 KR_STOCKS = [
@@ -376,13 +378,13 @@ def build_prompt(news_items: list, hours: int) -> str:
         "    \"score\": -100 to 100,\n"
         "    \"market_overview\": \"(Korean, 2-3 sentences about current market)\",\n"
         "  },\n"
-        "  \"key_issues\": [ 3-4 items: {category, person_or_event(Korean name), title(Korean), detail(Korean 2 sentences), impact, affected_sectors[2], news_url} ],\n"
+        "  \"key_issues\": [ 3-4 items: {category(person_statement|economic_indicator|geopolitics|commodity|corporate|market), person_or_event(Korean), title(Korean), detail(Korean 2 sentences from actual news), impact(positive|negative|neutral), affected_sectors[2], news_url} ],\n"
         "  \"top_news\": [ 5 items: {title(Korean), url, source, lang:\"ko\", impact, category, summary(Korean 2 sentences)} ],\n"
         "  \"us_market\": { outlook(Korean 2 sentences), sectors[2-3]{name,name_ko(Korean),etf,strength(1-5),signal,news_trigger(Korean),reason(Korean)}, stocks[2]{ticker,name,sector,signal,news_trigger(Korean),reason(Korean),risk} },\n"
         "  \"kr_market\": { outlook(Korean 2 sentences), sectors[2-3]{name,strength(1-5),signal,news_trigger(Korean),reason(Korean),key_stocks[2 codes]}, stocks[2]{code(6digits),isin,name(Korean),sector,signal,news_trigger(Korean),reason(Korean),risk,target_price} },\n"
         "  \"risks\": [ 2-3 items: {title(Korean), detail(Korean 2 sentences), severity:high|medium|low, related_sectors[1-2]} ]\n"
         "}\n\n"
-        "Korean domestic stock pick rule: stocks[0]=large cap, stocks[1]=mid cap. Available: "
+        "STRICT RULE: Korean stocks MUST be directly mentioned or clearly implied by the news above. Do NOT pick stocks without news evidence. stocks[0]=large cap of most news-relevant sector, stocks[1]=different sector if possible. Available: "
         + kr_ref + "\n\n"
         "NEWS (last " + str(hours) + "h):\n"
         + news_text
@@ -520,10 +522,16 @@ def _get_bet_timing() -> dict:
     """현재 시각 기준 종가 베팅 타이밍 안내
     정규장: 09:00~15:30 / 종가베팅타임: 14:30~15:20
     넥스트레이드(야간장): 16:00~20:00 / 종가베팅타임: 19:10~19:50
+    주말·공휴일은 별도 처리
     """
     now = datetime.now()
     h, m = now.hour, now.minute
     t = h * 60 + m
+    weekday = now.weekday()  # 0=월 ... 4=금 / 5=토 / 6=일
+
+    # 주말 (토·일)
+    if weekday >= 5:
+        return {"label": "주말 휴장", "msg": "주식 시장이 휴장 중입니다. 월요일 시초가 전략을 준비하세요.", "highlight": False, "session": "weekend"}
 
     if t < 9 * 60:
         return {"label": "장 전", "msg": "정규장 시작 전입니다. 어제 기준 분석입니다.", "highlight": False, "session": "pre"}
