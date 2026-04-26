@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-nexus.py v2
-NEXUS Score 파이프라인
-- 섹터별 최소 1개 보장 (다양성)
-- 52주 고저가 KIS API 값 정상 전달
-- 장중 여부 판단 후 vol_rate 조건 처리
+nexus.py v3
+NEXUS Score 파이프라인 — HIGH 등급 우선 추출
+
+핵심 설계 원칙:
+1. "주목 섹터" (AI 선정) + "보완 섹터" (항상 강세인 반도체·금융) 함께 스캔
+2. 외국인 순매수는 1차 점수 상위 10개에만 조회 (정확도 vs 속도 균형)
+3. HIGH 등급만 추출 → 부족 시 MID로 채움 → 절대로 LOW 표시 안 함
+4. 섹터 중복 허용 (같은 섹터에 HIGH가 몰려있으면 그냥 보여줌)
+5. 최종 결과: HIGH 위주 0~3개 (기준 미달 시 0개도 가능)
 """
 
 import asyncio
@@ -14,20 +18,64 @@ from kis_official import (
     batch_fetch_investors, is_kis_available
 )
 from technical import calc_nexus_score
-from sector_stocks import get_sector_stocks
+from sector_stocks import get_sector_stocks, SECTOR_STOCKS
+
+# 항상 포함할 보완 섹터 (뉴스와 무관하게 강세 가능성 높은 섹터)
+ANCHOR_SECTORS = ["semiconductor", "finance"]
 
 
 def _is_market_open() -> bool:
-    """현재 정규장 또는 야간장 거래 시간인지 판단"""
-    now = datetime.now()
-    t = now.hour * 60 + now.minute
-    regular = 9 * 60 <= t <= 15 * 60 + 30
-    night   = 16 * 60 <= t <= 20 * 60
-    return regular or night
+    """정규장 또는 야간장 거래 시간 판단"""
+    t = datetime.now().hour * 60 + datetime.now().minute
+    return (9*60 <= t <= 15*60+30) or (16*60 <= t <= 20*60)
+
+
+def _build_scan_list(ai_sector_names: list) -> list:
+    """
+    스캔 대상 종목 목록 구성
+    
+    AI 주목 섹터 + ANCHOR 섹터 합집합으로 후보 구성
+    - AI 주목 섹터: 뉴스 관련성 높음 → 섹터당 8개 전부
+    - ANCHOR 섹터: 기본 포함 → 섹터당 6개 (상위 시총 우선)
+    - 중복 종목 제거
+    """
+    from sector_stocks import get_sector_stocks, SECTOR_STOCKS, SECTOR_MAP
+
+    seen_codes = set()
+    result = []
+
+    # AI 주목 섹터 먼저 (뉴스 관련성 높음, 전량)
+    ai_stocks = get_sector_stocks(ai_sector_names, max_per_sector=8)
+    for s in ai_stocks:
+        if s["code"] not in seen_codes:
+            seen_codes.add(s["code"])
+            result.append({**s, "source": "ai"})
+
+    # ANCHOR 섹터 추가 (AI 섹터에 없는 것만, 상위 6개)
+    for sk in ANCHOR_SECTORS:
+        # AI가 이미 선택한 섹터면 스킵 (이미 전량 포함됨)
+        ai_keys = set()
+        for name in ai_sector_names:
+            n = name.lower().strip()
+            if n in SECTOR_MAP:
+                ai_keys.add(SECTOR_MAP[n])
+        if sk in ai_keys:
+            continue
+        for stock in SECTOR_STOCKS.get(sk, [])[:6]:
+            if stock["code"] not in seen_codes:
+                seen_codes.add(stock["code"])
+                result.append({**stock, "sector_key": sk, "source": "anchor"})
+
+    return result
 
 
 async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
-    """NEXUS Score 전체 파이프라인"""
+    """
+    NEXUS Score 파이프라인 — HIGH 우선 추출
+
+    sector_names: AI가 선정한 주목 섹터명 리스트
+    top_n: 최대 추천 종목 수 (기본 3)
+    """
     if not is_kis_available():
         return {
             "available": False,
@@ -35,37 +83,35 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
             "top": [],
         }
 
-    # 1. 섹터별 후보 종목
-    candidates = get_sector_stocks(sector_names, max_per_sector=8)
+    # ── 1. 스캔 대상 종목 구성 ─────────────────────────────
+    candidates = _build_scan_list(sector_names)
     if not candidates:
-        return {
-            "available": True,
-            "message": "후보 종목 없음",
-            "top": [],
-        }
+        return {"available": True, "message": "후보 종목 없음", "top": []}
 
     codes = [c["code"] for c in candidates]
     code_to_meta = {c["code"]: c for c in candidates}
 
-    # 2. 일봉 차트 병렬 조회 (KIS REST API)
+    # ── 2. 일봉 차트 병렬 조회 ────────────────────────────
     charts = await batch_fetch_charts(codes)
     valid_codes = [
-        code for code in codes
-        if code in charts and "bars" in charts[code] and len(charts[code]["bars"]) >= 15
+        c for c in codes
+        if c in charts
+        and "bars" in charts[c]
+        and len(charts[c]["bars"]) >= 15
     ]
 
     if not valid_codes:
         return {
             "available": True,
-            "message": "차트 조회 실패 - KIS 토큰 또는 API 오류",
+            "message": "차트 조회 실패 — KIS 토큰 또는 API 오류",
             "candidates_tried": len(codes),
             "top": [],
         }
 
-    # 3. 현재가 + 거래량비율 병렬 조회
+    # ── 3. 현재가 병렬 조회 (prdy_vrss_vol_rate 포함) ────
     price_data = await batch_fetch_prices(valid_codes)
 
-    # 4. 1차 점수로 상위 6개 추려서 외국인 순매수 조회
+    # ── 4. 1차 점수 계산 (외국인 없이) ───────────────────
     market_open = _is_market_open()
     prelim = []
     for code in valid_codes:
@@ -75,23 +121,22 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
         prelim.append((code, s["total"]))
 
     prelim.sort(key=lambda x: x[1], reverse=True)
-    top6_codes = [c for c, _ in prelim[:6]]
 
-    # 5. 외국인 순매수 조회 (상위 6개)
+    # ── 5. 외국인 순매수 조회 (1차 상위 10개) ────────────
+    # 상위 10개로 넓혀서 외국인 점수 반영 정확도 향상
+    top10_codes = [c for c, _ in prelim[:10]]
     investor_data = {}
-    if top6_codes:
-        investor_data = await batch_fetch_investors(top6_codes)
+    if top10_codes:
+        investor_data = await batch_fetch_investors(top10_codes)
 
-    # 6. 최종 NEXUS Score 계산
+    # ── 6. 최종 NEXUS Score 계산 ──────────────────────────
     scored = []
     errors = []
     for code in valid_codes:
-        meta = code_to_meta.get(code, {})
-        bars = charts[code]["bars"]
-        pd   = price_data.get(code, {})
-        inv  = investor_data.get(code, {})
-
-        # 52주 고저가: KIS fetch_daily_chart output1 값 우선
+        meta       = code_to_meta.get(code, {})
+        bars       = charts[code]["bars"]
+        pd         = price_data.get(code, {})
+        inv        = investor_data.get(code, {})
         chart_meta = charts[code]
 
         try:
@@ -105,52 +150,56 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
             )
 
             scored.append({
-                "code":        code,
-                "name":        chart_meta.get("name") or meta.get("name", ""),
-                "sector":      meta.get("name", ""),
-                "sector_key":  meta.get("sector_key", ""),
-                "cap":         meta.get("cap", ""),
-                "price":       round(current_price),
-                "change_rate": round(change_rate, 2),
-                "nexus":       nexus,
-                "has_investor":bool(inv),
+                "code":         code,
+                "name":         chart_meta.get("name") or meta.get("name", ""),
+                "sector":       meta.get("name", ""),
+                "sector_key":   meta.get("sector_key", ""),
+                "cap":          meta.get("cap", ""),
+                "source":       meta.get("source", "ai"),   # ai | anchor
+                "price":        round(current_price),
+                "change_rate":  round(change_rate, 2),
+                "nexus":        nexus,
+                "has_investor": bool(inv),
             })
         except Exception as e:
             errors.append({"code": code, "error": str(e)})
 
+    # ── 7. HIGH 우선 선발 ────────────────────────────────
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
 
-    # 7. 섹터별 1개 보장 (다양성)
-    seen_sectors = set()
-    diverse_top  = []
-    remainder    = []
+    high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
+    mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
 
-    for s in scored:
-        sk = s["sector_key"]
-        if sk not in seen_sectors:
-            seen_sectors.add(sk)
-            diverse_top.append(s)
-        else:
-            remainder.append(s)
+    # HIGH를 최대 top_n개까지
+    # HIGH 부족 시 MID로 보충 (단, HIGH가 1개도 없으면 MID도 표시 안 함)
+    if len(high_list) >= 1:
+        final_top = high_list[:top_n]
+        # HIGH가 top_n보다 적으면 MID 상위로 채움
+        if len(final_top) < top_n:
+            needed = top_n - len(final_top)
+            final_top += mid_list[:needed]
+    else:
+        # HIGH가 하나도 없으면 빈 결과 (LOW는 절대 표시 안 함)
+        final_top = []
 
-    # 섹터별 1개씩 확보 후 남은 슬롯은 점수 상위로 채움
-    final_top = diverse_top[:top_n]
-    if len(final_top) < top_n:
-        for s in remainder:
-            if len(final_top) >= top_n:
-                break
-            if s not in final_top:
-                final_top.append(s)
-
-    # 최종 정렬 (점수순)
+    # 최종 점수순 정렬
     final_top.sort(key=lambda x: x["nexus"]["total"], reverse=True)
+
+    # 통계 정보
+    grade_counts = {
+        "HIGH": len(high_list),
+        "MID":  len(mid_list),
+        "LOW":  len(scored) - len(high_list) - len(mid_list),
+    }
 
     return {
         "available":        True,
         "candidates_count": len(valid_codes),
         "scored_count":     len(scored),
         "sectors_searched": sector_names,
+        "anchor_sectors":   ANCHOR_SECTORS,
         "market_open":      market_open,
+        "grade_counts":     grade_counts,
         "top":              final_top,
         "all":              scored,
         "errors":           errors,
