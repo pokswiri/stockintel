@@ -111,11 +111,11 @@ async def run_nexus(
     try:
         if ai_failed or not sector_names:
             # AI 실패: 전체 시장 외국인+기관 순매수 상위
-            raw = await fetch_all_market_candidates(top_n=40)
+            raw = await fetch_all_market_candidates(top_n=50)
         else:
             # AI 성공: 해당 업종 외국인+기관 순매수 상위
             raw = await fetch_sector_candidates(
-                sector_keys=sector_keys, top_n=30)
+                sector_keys=sector_keys, top_n=40)
 
         # 가집계 데이터: 장외(주말 포함)에는 전일 데이터 반환
         api_candidates = [
@@ -135,12 +135,20 @@ async def run_nexus(
         api_candidates = []
         print(f"[NEXUS] fetch_sector_candidates 오류: {_api_err}")
 
-    # API 후보 없으면 하드코딩 폴백
+    # API 결과 + sector_stocks 핵심 종목 항상 병합 (일관성 확보)
     if not api_candidates:
         api_candidates = _fallback_candidates(sector_keys, ai_failed)
         scan_source = "fallback"
     else:
         scan_source = "realtime"
+        # sector_stocks 핵심 종목을 API 결과에 항상 추가
+        # → API 응답 변동에도 검증된 대장주 커버 보장
+        fallback = _fallback_candidates(sector_keys, ai_failed)
+        existing_codes = {c["code"] for c in api_candidates}
+        for s in fallback:
+            if s["code"] not in existing_codes:
+                api_candidates.append(s)
+                existing_codes.add(s["code"])
 
     if not api_candidates:
         return {"available": True, "message": "후보 종목 없음", "top": []}
