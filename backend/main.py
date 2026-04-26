@@ -398,31 +398,36 @@ async def analyze_gemini(prompt: str) -> dict:
 
 
 async def analyze_groq(prompt: str) -> dict:
-    body = {
-        "model": "mixtral-8x7b-32768",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.3,
-        "max_tokens": 4000,
-    }
-    for attempt in range(2):
-        async with httpx.AsyncClient(timeout=60) as client:
-            r = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": "Bearer " + GROQ_KEY,
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-            if r.status_code == 429 and attempt == 0:
-                await asyncio.sleep(15)
-                continue
-            if r.status_code == 413:
-                raise RuntimeError("Groq: payload too large")
-            r.raise_for_status()
-            text = r.json()["choices"][0]["message"]["content"]
-            return parse_json(text)
-    raise RuntimeError("Groq: rate limit after retry")
+    # 모델 우선순위: 70b → 8b (400/413 에러 시 자동 폴백)
+    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    last_err = ""
+    for model in models:
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 3000,
+        }
+        for attempt in range(2):
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": "Bearer " + GROQ_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+                if r.status_code == 429 and attempt == 0:
+                    await asyncio.sleep(15)
+                    continue
+                if r.status_code in (400, 413):
+                    last_err = f"Groq {model}: {r.status_code}"
+                    break  # 다음 모델 시도
+                r.raise_for_status()
+                text = r.json()["choices"][0]["message"]["content"]
+                return parse_json(text)
+    raise RuntimeError("Groq: all models failed. " + last_err)
 
 
 async def analyze_claude(prompt: str) -> dict:
@@ -468,7 +473,22 @@ async def run_analysis(news: list, hours: int):
         except Exception as ex:
             errors.append("Groq: " + str(ex))
 
-    raise RuntimeError("All AI failed: " + " | ".join(errors))
+    # 모든 AI 실패 시 빈 결과 반환 (서버 크래시 방지)
+    fallback = {
+        "summary": {
+            "headline": "AI 분석 일시 오류",
+            "sentiment": "neutral",
+            "score": 0,
+            "market_overview": "AI 분석 서비스에 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+        },
+        "key_issues": [],
+        "top_news": [],
+        "us_market": {"outlook": "", "sectors": [], "stocks": []},
+        "kr_market": {"outlook": "", "sectors": [], "stocks": []},
+        "risks": [],
+        "_errors": errors,
+    }
+    return fallback, "error"
 
 
 def _get_bet_timing() -> dict:
