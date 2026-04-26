@@ -531,7 +531,12 @@ def _get_bet_timing() -> dict:
 
     # 주말 (토·일)
     if weekday >= 5:
-        return {"label": "주말 휴장", "msg": "주식 시장이 휴장 중입니다. 월요일 시초가 전략을 준비하세요.", "highlight": False, "session": "weekend"}
+        return {
+            "label": "주말 휴장",
+            "msg": "금요일 종가 기준 분석입니다. NEXUS Score는 최근 거래일 데이터를 반영합니다.",
+            "highlight": False,
+            "session": "weekend",
+        }
 
     if t < 9 * 60:
         return {"label": "장 전", "msg": "정규장 시작 전입니다. 어제 기준 분석입니다.", "highlight": False, "session": "pre"}
@@ -635,7 +640,7 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
 
             # NEXUS + 섹터 ETF/업종지수 병렬 실행
             # AI 실패 시에도 NEXUS는 전체 섹터 스캔으로 독립 실행
-            nexus_timeout = 90.0 if ai_failed else 60.0  # 전체 스캔 시 더 여유
+            nexus_timeout = 120.0 if ai_failed else 60.0  # 전체 스캔(주말 포함) 여유
             nexus_result, sector_etfs_live, sector_indices_live = await asyncio.gather(
                 asyncio.wait_for(
                     run_nexus(sector_names, top_n=3, ai_failed=ai_failed),
