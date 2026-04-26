@@ -321,13 +321,15 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
           </div>
         </div>
       </div>
+      <div id="nx-watch-section" style="display:none">
+        <div class="lbl" id="nx-watch-label">👀 관심 종목 — MID 등급 (참고용)</div>
+        <div id="nx-watch-cards"></div>
+      </div>
       <div class="lbl">AI 추천 종목</div>
       <div class="card" id="kr-stk"></div>
     </div>
 
-      <div class="lbl">추천 섹터</div>
-      <div class="lbl">추천 종목</div>
-    </div>
+
 
     <div class="sec" id="s-risk">
       <div class="lbl">주요 리스크 요인</div>
@@ -345,11 +347,12 @@ let hours=24,timer=null;
 const ic=i=>i==="positive"?"up":i==="negative"?"dn":"neut";
 const ia=i=>i==="positive"?"▲":i==="negative"?"▼":"─";
 const sc=s=>s==="buy"?"#22C55E":s==="hold"?"#F59E0B":"#3B82F6";
+const STOCK_NAMES={"005930":"삼성전자","000660":"SK하이닉스","042700":"한미반도체","240810":"원익IPS","012450":"한화에어로","079550":"LIG넥스원","047810":"한국항공우주","064350":"현대로템","035420":"NAVER","035720":"카카오","005380":"현대차","000270":"기아","373220":"LG에너지솔루션","006400":"삼성SDI","051910":"LG화학","009830":"한화솔루션","105560":"KB금융","055550":"신한지주","068270":"셀트리온","207940":"삼성바이오로직스","005490":"POSCO홀딩스","036830":"솔브레인홀딩스","058470":"리노공업","028300":"HLB","032830":"삼성생명","086790":"하나금융지주","145020":"휴젤","196170":"알테오젠"};
 const sl=s=>s==="buy"?"매수":s==="hold"?"보유":"관망";
 const svc=s=>s==="high"?"#EF4444":s==="medium"?"#F59E0B":"#22C55E";
 const svl=s=>s==="high"?"위험 高":s==="medium"?"위험 中":"위험 低";
 const cc=c=>({person_statement:"#A855F7",economic_indicator:"#3B82F6",geopolitics:"#EF4444",commodity:"#F59E0B",corporate:"#22C55E",market:"#14B8A6"})[c]||"#8A95A8";
-const cl=c=>({person_statement:"인물발언",economic_indicator:"경제지표",geopolitics:"지정학",commodity:"원자재",corporate:"기업이슈",market:"시장동향"})[c]||c||"기타";
+const cl=c=>({person_statement:"인물발언",economic_indicator:"경제지표",geopolitics:"지정학",commodity:"원자재",corporate:"기업이슈",market:"시장동향",person_or_event:"인물발언",economy:"경제",finance:"금융",technology:"기술",politics:"정치",us_market:"미국시장",kr_market:"국내시장"})[c]||"기타";
 
 function setH(h,b){hours=h;document.querySelectorAll('.rb').forEach(x=>x.classList.remove('on'));b.classList.add('on')}
 function tab(id,b){document.querySelectorAll('.tb').forEach(x=>x.classList.remove('on'));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));b.classList.add('on');document.getElementById('s-'+id).classList.add('on')}
@@ -465,12 +468,12 @@ function render(data){
   document.getElementById('kr-tags').innerHTML=(kr.sectors||[]).map(x=>`<span class="tag" style="background:rgba(34,197,94,.1);color:var(--green)">${esc(x.name)}</span>`).join('');
 
   // KR sectors
-  document.getElementById('kr-sec').innerHTML=(kr.sectors||[]).map(x=>`<div class="scc"><div class="scc-top"><div><div class="scc-name">${esc(x.name)}</div>${x.key_stocks?`<div class="scc-sub">${(x.key_stocks||[]).map(esc).join(' · ')}</div>`:''}</div><span class="sig-p" style="background:${sc(x.signal)}18;color:${sc(x.signal)};border:1px solid ${sc(x.signal)}28">${sl(x.signal)}</span></div><div class="str">${[1,2,3,4,5].map(i=>`<div class="sd ${i<=(x.strength||3)?'on':''}"></div>`).join('')}</div><div class="tr-row"><span class="tr-ic">💡</span><span class="tr-t">${esc(x.news_trigger)}</span></div><div class="scc-r">${esc(x.reason)}</div></div>`).join('')||'<div style="color:var(--txt3);font-size:13px">데이터 없음</div>';
+  document.getElementById('kr-sec').innerHTML=(kr.sectors||[]).map(x=>`<div class="scc"><div class="scc-top"><div><div class="scc-name">${esc(x.name)}</div>${x.key_stocks?`<div class="scc-sub">${(x.key_stocks||[]).map(c=>STOCK_NAMES[c]||c).map(esc).join(' · ')}</div>`:''}</div><span class="sig-p" style="background:${sc(x.signal)}18;color:${sc(x.signal)};border:1px solid ${sc(x.signal)}28">${sl(x.signal)}</span></div><div class="str">${[1,2,3,4,5].map(i=>`<div class="sd ${i<=(x.strength||3)?'on':''}"></div>`).join('')}</div><div class="tr-row"><span class="tr-ic">💡</span><span class="tr-t">${esc(x.news_trigger)}</span></div><div class="scc-r">${esc(x.reason)}</div></div>`).join('')||'<div style="color:var(--txt3);font-size:13px">데이터 없음</div>';
 
   // KR stocks
   document.getElementById('kr-stk').innerHTML=(kr.stocks||[]).map(x=>{
-    const pd=x.price_data,chg=parseFloat(pd?.chg_pct||0),cls=chg>0?'up':chg<0?'dn':'neut';
-    return `<div class="stk"><div class="stk-top"><div class="stk-code">${esc(x.code)}</div><div class="stk-info"><div class="stk-name">${esc(x.name)}</div><div class="stk-sub">${esc(x.sector)}</div></div><div class="stk-r"><span class="sig-p" style="background:${sc(x.signal)}18;color:${sc(x.signal)};border:1px solid ${sc(x.signal)}28">${sl(x.signal)}</span>${pd?.close?`<span class="p-main ${cls}">${pd.close.toLocaleString()}원</span><span class="p-chg ${cls}">${chg>0?'+':''}${chg.toFixed(2)}%</span>`:`<span class="p-na">주가 미연동</span>`}${x.target_price?`<span class="p-tgt">목표 ${parseInt(x.target_price).toLocaleString()}원</span>`:''}</div></div><div class="tr-row"><span class="tr-ic">💡</span><span class="tr-t">${esc(x.news_trigger)}</span></div><div class="scc-r">${esc(x.reason)}</div></div>`
+    const pd=x.price_data,price=pd?.close||pd?.price||0,chg=parseFloat(pd?.chg_pct||pd?.change_rate||0),cls=chg>0?'up':chg<0?'dn':'neut';
+    return `<div class="stk"><div class="stk-top"><div class="stk-code">${esc(x.code)}</div><div class="stk-info"><div class="stk-name">${esc(x.name)}</div><div class="stk-sub">${esc(x.sector)}</div></div><div class="stk-r"><span class="sig-p" style="background:${sc(x.signal)}18;color:${sc(x.signal)};border:1px solid ${sc(x.signal)}28">${sl(x.signal)}</span>${price?`<span class="p-main ${cls}">${price.toLocaleString()}원</span><span class="p-chg ${cls}">${chg>0?'+':''}${chg.toFixed(2)}%</span>`:`<span class="p-na">주가 미연동</span>`}${x.target_price?`<span class="p-tgt">목표 ${parseInt(x.target_price).toLocaleString()}원</span>`:''}</div></div><div class="tr-row"><span class="tr-ic">💡</span><span class="tr-t">${esc(x.news_trigger)}</span></div><div class="scc-r">${esc(x.reason)}</div></div>`
   }).join('')||'<div style="color:var(--txt3);font-size:13px">데이터 없음</div>';
 
 
@@ -528,14 +531,31 @@ function render(data){
     document.getElementById('nx-section').style.display = 'none';
   }
 
+  // 관심 종목 (MID) 섹션 렌더링
+  const watchList = nx?.watch || [];
+  const watchSec = document.getElementById('nx-watch-section');
+  if (watchList.length > 0 && (!nx?.top || nx.top.length === 0)) {
+    watchSec.style.display = 'block';
+    const watchCards = watchList.map(s => {
+      try { return renderNexusCard(s, true); }
+      catch(e) { return ''; }
+    }).join('');
+    document.getElementById('nx-watch-cards').innerHTML = watchCards;
+    setTimeout(() => {
+      watchList.forEach(s => { try { drawCandles(s.code, s.nexus.candles); } catch(e){} });
+    }, 100);
+  } else {
+    watchSec.style.display = 'none';
+  }
+
   showDash();
 }
 
-function renderNexusCard(s) {
+function renderNexusCard(s, isWatch=false) {
   const nx = s.nexus;
   const bd = nx.breakdown;
   const grade = nx.grade;
-  const gradeColor = grade==='HIGH'?'var(--red)':grade==='MID'?'var(--amber)':'var(--txt3)';
+  const gradeColor = isWatch ? 'var(--accent2)' : grade==='HIGH'?'var(--red)':grade==='MID'?'var(--amber)':'var(--txt3)';
   const chgCls = s.change_rate > 0 ? 'up' : s.change_rate < 0 ? 'dn' : 'neut';
   const chgSign = s.change_rate > 0 ? '+' : '';
 
