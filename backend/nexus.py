@@ -1,108 +1,92 @@
 # -*- coding: utf-8 -*-
 """
-nexus.py v4
-NEXUS Score 파이프라인
+nexus.py v5
+NEXUS Score 파이프라인 — 실시간 수급 기반 후보 선정
 
-핵심 변경사항:
-1. AI 독립 구조 — AI 분석 실패해도 전체 섹터 스캔 실행
-2. 시총 필터 — KIS API 응답의 mktcap 기반 소형주 제외
-   코스피: 1000억↑ / 코스닥: 500억↑ (구분 불가 시 500억↑)
-3. 외국인 조회 전체 확대 — top10 → 전체 valid_codes
-4. 섹터 선정 전략:
-   - AI 성공 시: AI 주목 섹터(전량) + ANCHOR 섹터(보완)
-   - AI 실패 시: 전체 9개 섹터 스캔
-5. HIGH 우선, MID 보충으로 최대 3개
+흐름:
+  뉴스 → AI 섹터 결정
+    ↓
+  KIS foreign_institution_total
+  → 해당 업종 외국인+기관 순매수 상위 30개 실시간 수신
+    ↓
+  30개 → 일봉 차트 조회 → NEXUS Score 계산
+  (VCP 수축 + Stage2 정배열 + RSI + 52주 위치)
+    ↓
+  수급도 들어오고 기술적으로도 준비된 종목 → HIGH 등급
+    ↓
+  HIGH 우선 3개 추천 (부족 시 MID 보충)
+
+폴백:
+  API 실패 / 후보 없음 → sector_stocks.py 하드코딩 목록으로 대체
+  AI 실패 → 전체 시장(코스피+코스닥) 외국인/기관 순매수 상위 조회
 """
 
 import asyncio
 from datetime import datetime
 from kis_official import (
+    fetch_sector_candidates, fetch_all_market_candidates,
     batch_fetch_charts, batch_fetch_prices,
-    batch_fetch_investors, is_kis_available
+    batch_fetch_investors, is_kis_available,
 )
 from technical import calc_nexus_score
-from sector_stocks import (
-    get_sector_stocks, get_all_sector_keys,
-    SECTOR_STOCKS, SECTOR_MAP
-)
+from sector_stocks import get_sector_stocks, SECTOR_STOCKS, SECTOR_MAP
 
-# 뉴스 무관하게 항상 포함할 보완 섹터
 ANCHOR_SECTORS = ["semiconductor", "finance"]
-
-# 시총 필터 기준 (단위: 억원)
-MKTCAP_MIN = 500  # 500억 미만 제외
+MKTCAP_MIN = 500  # 억원, 시총 필터
 
 
 def _is_market_open() -> bool:
-    t = datetime.now().hour * 60 + datetime.now().minute
+    t  = datetime.now().hour * 60 + datetime.now().minute
     wd = datetime.now().weekday()
     if wd >= 5:
         return False
     return (9*60 <= t <= 15*60+30) or (16*60 <= t <= 20*60)
 
 
-def _build_scan_list(ai_sector_names: list, ai_failed: bool = False) -> list:
-    """
-    스캔 대상 종목 목록 구성
-    - ai_failed=True: 전체 9개 섹터 스캔
-    - ai_failed=False: AI 주목 섹터 + ANCHOR 섹터
-    """
-    seen_codes = set()
-    result = []
-
-    if ai_failed or not ai_sector_names:
-        # AI 실패 시 전체 섹터 스캔
-        for sk, stocks in SECTOR_STOCKS.items():
-            for stock in stocks:
-                if stock["code"] not in seen_codes:
-                    seen_codes.add(stock["code"])
-                    result.append({**stock, "sector_key": sk, "source": "full_scan"})
-        return result
-
-    # AI 주목 섹터 먼저 (전량)
-    ai_stocks = get_sector_stocks(ai_sector_names, max_per_sector=8)
-    for s in ai_stocks:
-        if s["code"] not in seen_codes:
-            seen_codes.add(s["code"])
-            result.append({**s, "source": "ai"})
-
-    # AI가 이미 선택한 섹터 키 목록
-    ai_keys = set()
-    for name in ai_sector_names:
+def _sector_names_to_keys(sector_names: list) -> list:
+    """AI 섹터명 → 내부 키 변환"""
+    keys = []
+    for name in sector_names:
         n = name.lower().strip()
         if n in SECTOR_MAP:
-            ai_keys.add(SECTOR_MAP[n])
+            keys.append(SECTOR_MAP[n])
         elif n in SECTOR_STOCKS:
-            ai_keys.add(n)
-
-    # ANCHOR 섹터 보완 (AI 섹터에 없는 것만, 상위 6개)
-    for sk in ANCHOR_SECTORS:
-        if sk in ai_keys:
-            continue
-        for stock in SECTOR_STOCKS.get(sk, [])[:6]:
-            if stock["code"] not in seen_codes:
-                seen_codes.add(stock["code"])
-                result.append({**stock, "sector_key": sk, "source": "anchor"})
-
+            keys.append(n)
+        else:
+            for kw, key in SECTOR_MAP.items():
+                if kw in n or n in kw:
+                    keys.append(key)
+                    break
+    # 중복 제거 + ANCHOR 항상 포함
+    result = list(dict.fromkeys(keys))  # 순서 유지 중복 제거
+    for a in ANCHOR_SECTORS:
+        if a not in result:
+            result.append(a)
     return result
 
 
-def _filter_by_mktcap(scored: list, price_data: dict) -> list:
-    """시총 필터: MKTCAP_MIN 억원 미만 제외"""
-    filtered = []
-    removed = []
-    for s in scored:
-        code = s["code"]
-        pd = price_data.get(code, {})
-        # mktcap은 억원 단위 (KIS hts_avls 필드: 억원)
-        mktcap = pd.get("mktcap", 0)
-        if mktcap > 0 and mktcap < MKTCAP_MIN:
-            removed.append(f"{s['name']}({code}): {mktcap}억")
-            continue
-        filtered.append(s)
-    if removed:
-        print(f"[NEXUS] 시총 필터 제외: {removed}")
-    return filtered
+def _fallback_candidates(sector_keys: list, ai_failed: bool) -> list:
+    """
+    KIS API 실패 시 sector_stocks.py 하드코딩 목록으로 폴백
+    """
+    seen = set()
+    result = []
+    if ai_failed:
+        # AI 실패: 전체 섹터 상위 5개씩
+        for sk, stocks in SECTOR_STOCKS.items():
+            for s in stocks[:5]:
+                if s["code"] not in seen:
+                    seen.add(s["code"])
+                    result.append({**s, "sector_key": sk,
+                                   "source": "fallback_full"})
+    else:
+        for sk in sector_keys:
+            for s in SECTOR_STOCKS.get(sk, []):
+                if s["code"] not in seen:
+                    seen.add(s["code"])
+                    result.append({**s, "sector_key": sk,
+                                   "source": "fallback_sector"})
+    return result
 
 
 async def run_nexus(
@@ -112,99 +96,141 @@ async def run_nexus(
 ) -> dict:
     """
     NEXUS Score 파이프라인
-    sector_names: AI 선정 섹터 (빈 리스트 가능)
-    ai_failed: True면 전체 섹터 스캔
+    sector_names : AI 선정 섹터명 리스트
+    ai_failed    : True → 전체 시장 스캔
     """
     if not is_kis_available():
-        return {
-            "available": False,
-            "message": "KIS API 키가 설정되지 않았습니다",
-            "top": [],
-        }
+        return {"available": False,
+                "message": "KIS API 키가 설정되지 않았습니다", "top": []}
 
-    # ── 1. 스캔 대상 구성 ─────────────────────────────────
-    candidates = _build_scan_list(sector_names, ai_failed)
-    if not candidates:
+    market_open  = _is_market_open()
+    sector_keys  = _sector_names_to_keys(sector_names)
+
+    # ── 1. 후보 종목 실시간 수신 (KIS foreign_institution_total) ──────
+    api_candidates = []
+    try:
+        if ai_failed or not sector_names:
+            # AI 실패: 전체 시장 외국인+기관 순매수 상위
+            raw = await fetch_all_market_candidates(top_n=40)
+        else:
+            # AI 성공: 해당 업종 외국인+기관 순매수 상위
+            raw = await fetch_sector_candidates(
+                sector_keys=sector_keys, top_n=30)
+
+        # 가집계 데이터: 장외(주말 포함)에는 전일 데이터 반환
+        api_candidates = [
+            {
+                "code":       c["code"],
+                "name":       c["name"],
+                "sector_key": _guess_sector(c["code"]),
+                "cap":        "unknown",
+                "source":     "realtime_frgn",
+                "frgn_qty":   c.get("frgn_qty", 0),
+                "inst_qty":   c.get("inst_qty", 0),
+            }
+            for c in raw
+            if c.get("code")
+        ]
+    except Exception:
+        api_candidates = []
+
+    # API 후보 없으면 하드코딩 폴백
+    if not api_candidates:
+        api_candidates = _fallback_candidates(sector_keys, ai_failed)
+        scan_source = "fallback"
+    else:
+        scan_source = "realtime"
+
+    if not api_candidates:
         return {"available": True, "message": "후보 종목 없음", "top": []}
 
-    codes = [c["code"] for c in candidates]
-    code_to_meta = {c["code"]: c for c in candidates}
-    scan_mode = "전체" if ai_failed else "AI+보완"
+    codes = list(dict.fromkeys(c["code"] for c in api_candidates))
+    code_to_meta = {c["code"]: c for c in api_candidates}
 
-    # ── 2. 일봉 차트 병렬 조회 ────────────────────────────
+    # ── 2. 일봉 차트 병렬 조회 ────────────────────────────────────────
     charts = await batch_fetch_charts(codes)
     valid_codes = [
         c for c in codes
         if c in charts
         and "bars" in charts[c]
-        and len(charts[c]["bars"]) >= 20  # 최소 20일 (VCP 계산 기준)
+        and len(charts[c]["bars"]) >= 20
     ]
 
     if not valid_codes:
-        return {
-            "available": True,
-            "message": "차트 조회 실패",
-            "top": [],
-        }
+        return {"available": True,
+                "message": "차트 조회 실패", "top": []}
 
-    # ── 3. 현재가 + 시총 병렬 조회 ───────────────────────
+    # ── 3. 현재가 + 시총 조회 ────────────────────────────────────────
     price_data = await batch_fetch_prices(valid_codes)
 
-    # ── 4. 1차 점수 계산 (외국인 없이) ───────────────────
-    market_open = _is_market_open()
+    # ── 4. 1차 점수 (외국인 없이) → 상위 15개만 외국인 상세 조회 ────
     prelim = []
     for code in valid_codes:
         bars = charts[code]["bars"]
-        pd = price_data.get(code, {})
-        s = calc_nexus_score(bars, charts[code], {}, pd, market_open)
+        pd   = price_data.get(code, {})
+        s    = calc_nexus_score(bars, charts[code], {}, pd, market_open)
         prelim.append((code, s["total"]))
-
     prelim.sort(key=lambda x: x[1], reverse=True)
+    top15 = [c for c, _ in prelim[:15]]
 
-    # ── 5. 외국인 순매수 전체 조회 ───────────────────────
-    # 전체 valid_codes 조회 (순차, 0.12초 딜레이)
-    investor_data = await batch_fetch_investors(valid_codes)
+    investor_data = await batch_fetch_investors(top15)
 
-    # ── 6. 최종 NEXUS Score 계산 ──────────────────────────
-    scored_raw = []
+    # ── 5. 최종 NEXUS Score ──────────────────────────────────────────
+    scored = []
     errors = []
     for code in valid_codes:
         meta       = code_to_meta.get(code, {})
         bars       = charts[code]["bars"]
-        pd         = price_data.get(code, {})
+        pd_        = price_data.get(code, {})
         inv        = investor_data.get(code, {})
-        chart_meta = charts[code]
+
+        # 가집계에서 받은 수급 정보를 investor_data에 보완
+        if not inv and meta.get("frgn_qty", 0) > 0:
+            inv = {
+                "frgn_5d":             meta["frgn_qty"],
+                "frgn_20d":            meta["frgn_qty"],
+                "inst_5d":             meta.get("inst_qty", 0),
+                "inst_20d":            meta.get("inst_qty", 0),
+                "frgn_consec_days":    1,
+                "frgn_positive_days_5": 1,
+                "latest_date":         "",
+            }
+
+        # 시총 필터
+        mktcap = pd_.get("mktcap", 0)
+        if mktcap > 0 and mktcap < MKTCAP_MIN:
+            continue
 
         try:
-            nexus = calc_nexus_score(bars, chart_meta, inv, pd, market_open)
+            nexus = calc_nexus_score(
+                bars, charts[code], inv, pd_, market_open)
 
-            current_price = pd.get("price") or (bars[-1]["close"] if bars else 0)
-            change_rate = (
-                pd.get("change_rate")
-                or ((bars[-1]["close"] - bars[-2]["close"]) / bars[-2]["close"] * 100
-                    if len(bars) >= 2 else 0)
-            )
+            price = pd_.get("price") or (bars[-1]["close"] if bars else 0)
+            chg   = (pd_.get("change_rate")
+                     or ((bars[-1]["close"] - bars[-2]["close"])
+                         / bars[-2]["close"] * 100
+                         if len(bars) >= 2 else 0))
 
-            scored_raw.append({
+            scored.append({
                 "code":         code,
-                "name":         chart_meta.get("name") or meta.get("name", ""),
+                "name":         charts[code].get("name") or meta.get("name",""),
                 "sector_key":   meta.get("sector_key", ""),
                 "cap":          meta.get("cap", ""),
-                "source":       meta.get("source", "ai"),
-                "price":        round(current_price),
-                "change_rate":  round(change_rate, 2),
-                "mktcap":       pd.get("mktcap", 0),
+                "source":       meta.get("source", ""),
+                "price":        round(price),
+                "change_rate":  round(chg, 2),
+                "mktcap":       mktcap,
+                "frgn_today":   meta.get("frgn_qty", 0),
+                "inst_today":   meta.get("inst_qty", 0),
                 "nexus":        nexus,
                 "has_investor": bool(inv),
             })
         except Exception as e:
             errors.append({"code": code, "error": str(e)})
 
-    # ── 7. 시총 필터 ──────────────────────────────────────
-    scored = _filter_by_mktcap(scored_raw, price_data)
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
 
-    # ── 8. HIGH 우선 + MID 보충으로 최대 top_n개 ─────────
+    # ── 6. HIGH 우선 + MID 보충 ──────────────────────────────────────
     high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
     mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
     low_list  = [s for s in scored if s["nexus"]["grade"] == "LOW"]
@@ -218,20 +244,34 @@ async def run_nexus(
     for s in final_top:
         s["display_grade"] = s["nexus"]["grade"]
 
+    wd = datetime.now().weekday()
+    scan_mode = ("전체시장·전일기준" if (wd >= 5 and ai_failed)
+                 else "전체시장" if ai_failed
+                 else f"AI섹터({','.join(sector_keys[:3])})")
+
     return {
         "available":        True,
+        "scan_source":      scan_source,   # "realtime" or "fallback"
         "scan_mode":        scan_mode,
         "candidates_count": len(valid_codes),
-        "filtered_count":   len(scored),
         "scored_count":     len(scored),
-        "sectors_searched": sector_names if not ai_failed else list(SECTOR_STOCKS.keys()),
+        "sectors_searched": sector_keys,
         "market_open":      market_open,
         "grade_counts":     {
             "HIGH": len(high_list),
             "MID":  len(mid_list),
             "LOW":  len(low_list),
         },
-        "top":   final_top,
-        "all":   scored,
+        "top":    final_top,
+        "all":    scored,
         "errors": errors,
     }
+
+
+def _guess_sector(code: str) -> str:
+    """종목코드 → 섹터 추정 (sector_stocks.py 기반)"""
+    for sk, stocks in SECTOR_STOCKS.items():
+        for s in stocks:
+            if s["code"] == code:
+                return sk
+    return "unknown"

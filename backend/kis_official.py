@@ -506,3 +506,123 @@ async def fetch_sector_etfs(sector_keys: list) -> dict:
         if d:
             results[sk] = d
     return results
+
+
+# ── 업종별 외국인/기관 순매수 종목 실시간 조회 ─────────────────────────
+
+# 섹터 → KIS 업종코드 매핑
+SECTOR_TO_UPJONG = {
+    "semiconductor": ["0011"],          # 전기전자
+    "defense":       ["0021"],          # 운수장비
+    "healthcare":    ["0027"],          # 의약품
+    "finance":       ["0024"],          # 금융업
+    "battery":       ["0011"],          # 전기전자 (배터리 포함)
+    "auto_ev":       ["0021"],          # 운수장비
+    "renewable":     ["0007", "0014"],  # 철강금속 + 비금속 (신재생 분산)
+    "ai_platform":   ["0011"],          # 전기전자
+    "steel":         ["0007"],          # 철강금속
+    # 전체 시장 (섹터 미결정 시)
+    "all_kospi":     ["0001"],          # 코스피 전체
+    "all_kosdaq":    ["1001"],          # 코스닥 전체
+}
+
+
+async def fetch_sector_candidates(
+    sector_keys: list,
+    top_n: int = 30,
+    sort_type: str = "frgn",  # "frgn": 외국인순매수, "inst": 기관순매수
+) -> list:
+    """
+    업종별 외국인/기관 순매수 상위 종목 실시간 조회
+    TR_ID: FHPTJ04400000 (국내기관_외국인 매매종목 가집계)
+    
+    반환: [{"code": "005930", "name": "삼성전자", "frgn_qty": 1234567, ...}, ...]
+    """
+    token = await get_token()
+    if not token:
+        return []
+
+    # 섹터 → 업종코드 변환 (중복 제거)
+    upjong_codes = set()
+    for sk in sector_keys:
+        sk_lower = sk.lower().strip()
+        codes = SECTOR_TO_UPJONG.get(sk_lower, [])
+        upjong_codes.update(codes)
+    
+    # 섹터 매핑 실패 시 코스피+코스닥 전체 조회
+    if not upjong_codes:
+        upjong_codes = {"0001", "1001"}
+
+    all_candidates = {}  # code → 데이터 (중복 제거)
+
+    for upjong_code in upjong_codes:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    BASE_URL + "/uapi/domestic-stock/v1/quotations/foreign-institution-total",
+                    headers=_headers(token, "FHPTJ04400000"),
+                    params={
+                        "FID_COND_MRKT_DIV_CODE": "V",
+                        "FID_COND_SCR_DIV_CODE":  "16449",
+                        "FID_INPUT_ISCD":          upjong_code,
+                        "FID_DIV_CLS_CODE":        "0",   # 수량 정렬
+                        "FID_RANK_SORT_CLS_CODE":  "0",   # 순매수 상위
+                        "FID_ETC_CLS_CODE":        "0",   # 전체 (외국인+기관)
+                    },
+                )
+                r.raise_for_status()
+                items = r.json().get("output", [])
+
+                def to_int(v):
+                    try:
+                        return int(str(v).replace(",", ""))
+                    except Exception:
+                        return 0
+
+                for item in items:
+                    code = item.get("mksc_shrn_iscd", "").strip()
+                    if not code or len(code) != 6:
+                        continue
+                    name = item.get("hts_kor_isnm", "")
+                    frgn = to_int(item.get("frgn_ntby_qty", 0))
+                    inst = to_int(item.get("orgn_ntby_qty", 0))
+                    # 순매도 종목 제외 (둘 다 음수면 제외)
+                    if frgn <= 0 and inst <= 0:
+                        continue
+                    if code not in all_candidates:
+                        all_candidates[code] = {
+                            "code":     code,
+                            "name":     name,
+                            "frgn_qty": frgn,
+                            "inst_qty": inst,
+                            "total_net": frgn + inst,
+                            "upjong":   upjong_code,
+                        }
+                    else:
+                        # 같은 종목이 여러 업종에 있으면 합산
+                        all_candidates[code]["frgn_qty"] += frgn
+                        all_candidates[code]["inst_qty"] += inst
+                        all_candidates[code]["total_net"] += (frgn + inst)
+
+        except Exception:
+            continue
+        
+        await asyncio.sleep(0.1)  # API 호출 간격
+
+    # 외국인+기관 합산 순매수 상위 top_n개
+    sorted_list = sorted(
+        all_candidates.values(),
+        key=lambda x: x["total_net"],
+        reverse=True,
+    )
+    return sorted_list[:top_n]
+
+
+async def fetch_all_market_candidates(top_n: int = 40) -> list:
+    """
+    AI 실패 시: 코스피+코스닥 전체에서 외국인/기관 순매수 상위 종목 조회
+    """
+    return await fetch_sector_candidates(
+        sector_keys=["all_kospi", "all_kosdaq"],
+        top_n=top_n,
+    )
