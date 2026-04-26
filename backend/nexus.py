@@ -208,10 +208,27 @@ async def run_nexus(
                 "latest_date":         "",
             }
 
-        # 시총 필터
+        # ── 시총 필터 ──────────────────────────────────────
         mktcap = pd_.get("mktcap", 0)
+        price_now = pd_.get("price", 0) or (bars[-1]["close"] if bars else 0)
+
+        # 시총이 확인된 경우: MKTCAP_MIN(500억) 미만 제외
         if mktcap > 0 and mktcap < MKTCAP_MIN:
             continue
+
+        # 시총 미수신(0)인 경우: 주가 500원 미만 초저가 종목 제외
+        # (저가주는 외국인 가집계 노이즈 많음)
+        if mktcap == 0 and price_now < 500:
+            continue
+
+        # ── 당일 급등/급락 종목 제외 ────────────────────────
+        # 이미 터진 종목은 "시세 분출 전"이 아님
+        # ±10% 이상 당일 변동 종목 제외 (장 마감 기준)
+        # 단, 장외(주말) 에는 전일 종가 기준이므로 완화
+        chg_now = abs(pd_.get("change_rate", 0))
+        chg_threshold = 15.0 if not market_open else 10.0
+        if chg_now >= chg_threshold:
+            continue  # 이미 급등/급락 → 진입 타이밍 아님
 
         try:
             nexus = calc_nexus_score(
@@ -223,10 +240,15 @@ async def run_nexus(
                          / bars[-2]["close"] * 100
                          if len(bars) >= 2 else 0))
 
+            # sector_key: 하드코딩 목록에 없으면 현재가 업종명으로 매핑
+            sector_key = meta.get("sector_key", "")
+            if not sector_key or sector_key == "unknown":
+                sector_key = _guess_sector_from_price(code, pd_)
+
             scored.append({
                 "code":         code,
                 "name":         charts[code].get("name") or meta.get("name",""),
-                "sector_key":   meta.get("sector_key", ""),
+                "sector_key":   sector_key,
                 "cap":          meta.get("cap", ""),
                 "source":       meta.get("source", ""),
                 "price":        round(price),
@@ -280,6 +302,39 @@ async def run_nexus(
     }
 
 
+# KIS 업종 코드 → 내부 섹터 키 매핑
+UPJONG_TO_SECTOR = {
+    "0011": "semiconductor",  # 전기전자
+    "0021": "auto_ev",        # 운수장비
+    "0027": "healthcare",     # 의약품
+    "0024": "finance",        # 금융업
+    "0007": "steel",          # 철강금속
+    "0014": "renewable",      # 비금속광물
+    "0017": "defense",        # 기계 (방산 포함)
+    "0023": "finance",        # 증권
+    "0026": "finance",        # 보험
+    "0028": "healthcare",     # 의료정밀
+    "0010": "steel",          # 화학
+    "0005": "battery",        # 음식료 (제외 후 battery 기본)
+}
+
+# KIS hts_kor_isnm 업종명 키워드 → 섹터 매핑
+NAME_TO_SECTOR = {
+    "반도체": "semiconductor", "전자": "semiconductor",
+    "방산": "defense",  "항공": "defense", "조선": "defense",
+    "바이오": "healthcare", "제약": "healthcare", "의료": "healthcare",
+    "금융": "finance", "은행": "finance", "보험": "finance", "증권": "finance",
+    "배터리": "battery", "이차전지": "battery",
+    "자동차": "auto_ev", "부품": "auto_ev",
+    "태양광": "renewable", "풍력": "renewable", "에너지": "renewable",
+    "철강": "steel", "소재": "steel",
+    "플랫폼": "ai_platform", "인터넷": "ai_platform", "소프트웨어": "ai_platform",
+    "해운": "auto_ev",  # 해운/물류
+    "전선": "renewable",  # 전력인프라
+    "엔지니어링": "auto_ev",
+}
+
+
 def _guess_sector(code: str) -> str:
     """종목코드 → 섹터 추정 (sector_stocks.py 기반)"""
     for sk, stocks in SECTOR_STOCKS.items():
@@ -287,3 +342,20 @@ def _guess_sector(code: str) -> str:
             if s["code"] == code:
                 return sk
     return "unknown"
+
+
+def _guess_sector_from_price(code: str, price_data: dict) -> str:
+    """KIS 현재가 응답의 업종 정보로 섹터 추정"""
+    # 1. sector_stocks.py 직접 확인
+    result = _guess_sector(code)
+    if result != "unknown":
+        return result
+
+    # 2. KIS 업종명(hts_kor_isnm) 키워드 매칭
+    name = price_data.get("name", "")
+    for kw, sk in NAME_TO_SECTOR.items():
+        if kw in name:
+            return sk
+
+    # 3. 종목명으로도 추정 시도
+    return "기타"

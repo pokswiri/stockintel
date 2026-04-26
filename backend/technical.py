@@ -89,10 +89,13 @@ def calc_vcp_score(bars: list) -> tuple:
     # 최근 3개 조정 구간만 사용
     recent = corrections[-3:] if len(corrections) >= 3 else corrections
 
+    # 유효한 조정 구간만 (양수, 2% 이상 조정만 의미있음)
+    recent = [c for c in corrections[-3:] if c >= 2.0] if corrections else []
+
     if len(recent) >= 2:
         # 조정폭이 연속으로 줄어드는지 (완전 수축)
         fully_contracting = all(recent[k] > recent[k+1] for k in range(len(recent)-1))
-        if fully_contracting and recent[-1] < recent[0] * 0.6:
+        if fully_contracting and recent[-1] < recent[0] * 0.7:
             score += 15
             detail["vcp_contracting"] = [round(c, 1) for c in recent]
         elif recent[-1] < recent[0]:
