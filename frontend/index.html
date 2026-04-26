@@ -292,8 +292,7 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
       <button class="tb on" onclick="tab('issues',this)">🔥 이슈</button>
       <button class="tb" onclick="tab('news',this)">📰 뉴스</button>
       <button class="tb" onclick="tab('kr',this)">🇰🇷 국내</button>
-      <button class="tb" onclick="tab('us',this)">🇺🇸 미국</button>
-      <button class="tb" onclick="tab('risk',this)">⚠️ 리스크</button>
+            <button class="tb" onclick="tab('risk',this)">⚠️ 리스크</button>
     </div>
 
     <div class="sec on" id="s-issues">
@@ -326,13 +325,8 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
       <div class="card" id="kr-stk"></div>
     </div>
 
-    <div class="sec" id="s-us">
-      <div class="lbl">시장 전망</div>
-      <div class="card"><p class="ol-t" id="us-ol"></p><div class="tag-row" id="us-tags"></div></div>
       <div class="lbl">추천 섹터</div>
-      <div class="card" id="us-sec"></div>
       <div class="lbl">추천 종목</div>
-      <div class="card" id="us-stk"></div>
     </div>
 
     <div class="sec" id="s-risk">
@@ -478,16 +472,7 @@ function render(data){
     const pd=x.price_data,chg=parseFloat(pd?.chg_pct||0),cls=chg>0?'up':chg<0?'dn':'neut';
     return `<div class="stk"><div class="stk-top"><div class="stk-code">${esc(x.code)}</div><div class="stk-info"><div class="stk-name">${esc(x.name)}</div><div class="stk-sub">${esc(x.sector)}</div></div><div class="stk-r"><span class="sig-p" style="background:${sc(x.signal)}18;color:${sc(x.signal)};border:1px solid ${sc(x.signal)}28">${sl(x.signal)}</span>${pd?.close?`<span class="p-main ${cls}">${pd.close.toLocaleString()}원</span><span class="p-chg ${cls}">${chg>0?'+':''}${chg.toFixed(2)}%</span>`:`<span class="p-na">주가 미연동</span>`}${x.target_price?`<span class="p-tgt">목표 ${parseInt(x.target_price).toLocaleString()}원</span>`:''}</div></div><div class="tr-row"><span class="tr-ic">💡</span><span class="tr-t">${esc(x.news_trigger)}</span></div><div class="scc-r">${esc(x.reason)}</div></div>`
   }).join('')||'<div style="color:var(--txt3);font-size:13px">데이터 없음</div>';
-
-  // US outlook
-  document.getElementById('us-ol').textContent=us.outlook||'';
-  document.getElementById('us-tags').innerHTML=(us.sectors||[]).map(x=>`<span class="tag" style="background:rgba(59,130,246,.1);color:var(--accent2)">${esc(x.name_ko||x.name)}</span>`).join('');
-
-  // US sectors
-  document.getElementById('us-sec').innerHTML=(us.sectors||[]).map(x=>`<div class="scc"><div class="scc-top"><div><div class="scc-name">${esc(x.name_ko||x.name)}</div><div class="scc-sub">${esc(x.etf)}</div></div><span class="sig-p" style="background:${sc(x.signal)}18;color:${sc(x.signal)};border:1px solid ${sc(x.signal)}28">${sl(x.signal)}</span></div><div class="str">${[1,2,3,4,5].map(i=>`<div class="sd ${i<=(x.strength||3)?'on':''}"></div>`).join('')}</div><div class="tr-row"><span class="tr-ic">💡</span><span class="tr-t">${esc(x.news_trigger)}</span></div><div class="scc-r">${esc(x.reason)}</div></div>`).join('')||'<div style="color:var(--txt3);font-size:13px">데이터 없음</div>';
-
-  // US stocks
-  document.getElementById('us-stk').innerHTML=(us.stocks||[]).map(x=>`<div class="stk"><div class="stk-top"><div class="stk-code" style="color:var(--accent2)">${esc(x.ticker)}</div><div class="stk-info"><div class="stk-name">${esc(x.name)}</div><div class="stk-sub">${esc(x.sector)}</div></div><div class="stk-r"><span class="sig-p" style="background:${sc(x.signal)}18;color:${sc(x.signal)};border:1px solid ${sc(x.signal)}28">${sl(x.signal)}</span><span class="risk-l ${x.risk==='high'?'dn':x.risk==='medium'?'':'up'}">${x.risk==='high'?'위험↑':x.risk==='medium'?'보통':'안전'}</span></div></div><div class="tr-row"><span class="tr-ic">💡</span><span class="tr-t">${esc(x.news_trigger)}</span></div><div class="scc-r">${esc(x.reason)}</div></div>`).join('')||'<div style="color:var(--txt3);font-size:13px">데이터 없음</div>';
+color:${sc(x.signal)};border:1px solid ${sc(x.signal)}28">${sl(x.signal)}</span><span class="risk-l ${x.risk==='high'?'dn':x.risk==='medium'?'':'up'}">${x.risk==='high'?'위험↑':x.risk==='medium'?'보통':'안전'}</span></div></div><div class="tr-row"><span class="tr-ic">💡</span><span class="tr-t">${esc(x.news_trigger)}</span></div><div class="scc-r">${esc(x.reason)}</div></div>`).join('')||'<div style="color:var(--txt3);font-size:13px">데이터 없음</div>';
 
   // Risk
   document.getElementById('risk').innerHTML=(a.risks||[]).map(r=>`<div class="rc" style="background:${svc(r.severity)}08;border-color:${svc(r.severity)}"><div class="rc-top"><div class="rc-t">${esc(r.title)}</div><span class="sev-p" style="background:${svc(r.severity)}18;color:${svc(r.severity)}">${svl(r.severity)}</span></div><div class="rc-d">${esc(r.detail)}</div><div class="rc-chips">${(r.related_sectors||[]).map(s2=>`<span class="sc">${esc(s2)}</span>`).join('')}</div></div>`).join('')||'<div class="card" style="color:var(--txt3);font-size:13px">데이터 없음</div>';
