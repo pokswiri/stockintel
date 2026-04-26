@@ -511,20 +511,32 @@ async def run_analysis(news: list, hours: int):
 
 
 def _get_bet_timing() -> dict:
-    """현재 시각 기준 종가 베팅 타이밍 안내"""
+    """현재 시각 기준 종가 베팅 타이밍 안내
+    정규장: 09:00~15:30 / 종가베팅타임: 14:30~15:20
+    넥스트레이드(야간장): 16:00~20:00 / 종가베팅타임: 19:10~19:50
+    """
     now = datetime.now()
     h, m = now.hour, now.minute
-    total_min = h * 60 + m
-    if total_min < 9 * 60:
-        return {"label": "장 전", "msg": "오늘 장 시작 전입니다. 어제 기준 분석입니다.", "highlight": False}
-    elif total_min < 14 * 60 + 30:
-        return {"label": "장중", "msg": "장 마감 전 재분석 시 당일 수급이 반영됩니다.", "highlight": False}
-    elif total_min < 15 * 60 + 20:
-        return {"label": "🔔 종가 베팅 타임", "msg": "종가 매수 검토 시간입니다. 추천 종목 현재가를 확인하세요.", "highlight": True}
-    elif total_min < 15 * 60 + 30:
-        return {"label": "장마감 직전", "msg": "장 마감 5분 전입니다.", "highlight": False}
+    t = h * 60 + m
+
+    if t < 9 * 60:
+        return {"label": "장 전", "msg": "정규장 시작 전입니다. 어제 기준 분석입니다.", "highlight": False, "session": "pre"}
+    elif t < 14 * 60 + 30:
+        return {"label": "정규장 진행중", "msg": "장 마감 전 재분석 시 당일 수급이 반영됩니다.", "highlight": False, "session": "regular"}
+    elif t < 15 * 60 + 20:
+        return {"label": "🔔 정규장 종가 베팅 타임", "msg": "정규장 종가 매수 검토 시간입니다 (14:30~15:20). 추천 종목 현재가를 확인하세요.", "highlight": True, "session": "regular_close"}
+    elif t < 15 * 60 + 30:
+        return {"label": "정규장 마감 직전", "msg": "정규장 마감 5분 전입니다.", "highlight": False, "session": "regular_end"}
+    elif t < 16 * 60:
+        return {"label": "정규장 마감", "msg": "정규장이 마감됐습니다. 넥스트레이드(야간장) 16:00 시작 예정입니다.", "highlight": False, "session": "after_regular"}
+    elif t < 19 * 60 + 10:
+        return {"label": "넥스트레이드 진행중", "msg": "야간장(넥스트레이드) 거래 중입니다. 오후 8시 마감입니다.", "highlight": False, "session": "night"}
+    elif t < 19 * 60 + 50:
+        return {"label": "🔔 야간장 종가 베팅 타임", "msg": "넥스트레이드(야간장) 종가 매수 검토 시간입니다 (19:10~19:50). 마감 20:00.", "highlight": True, "session": "night_close"}
+    elif t < 20 * 60:
+        return {"label": "야간장 마감 직전", "msg": "넥스트레이드(야간장) 마감 10분 전입니다.", "highlight": False, "session": "night_end"}
     else:
-        return {"label": "장 마감", "msg": "오늘 종가 기준입니다. 내일 시초가 전략을 고려하세요.", "highlight": False}
+        return {"label": "전 장 마감", "msg": "정규장·야간장 모두 마감됐습니다. 내일 전략을 준비하세요.", "highlight": False, "session": "closed"}
 
 
 @app.get("/analyze")
