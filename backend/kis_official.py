@@ -146,31 +146,32 @@ async def fetch_investor_trend(code: str) -> dict:
             if not items:
                 return {}
 
-            def to_int(v):
+            def to_signed_int(v):
+                """음수(매도) 포함 정수 변환 - 콤마만 제거, 부호 유지"""
                 try:
-                    return int(str(v).replace(",", "").replace("-", "0"))
+                    return int(str(v).replace(",", ""))
                 except Exception:
                     return 0
 
-            # 최근 5일, 20일 외국인/기관 순매수 합산
-            frgn_5d = sum(to_int(d.get("frgn_ntby_qty", 0)) for d in items[:5])
-            frgn_20d = sum(to_int(d.get("frgn_ntby_qty", 0)) for d in items[:20])
-            inst_5d = sum(to_int(d.get("orgn_ntby_qty", 0)) for d in items[:5])  # 기관 순매수
-            inst_20d = sum(to_int(d.get("orgn_ntby_qty", 0)) for d in items[:20])
+            # 최근 5일, 20일 외국인/기관 순매수 합산 (음수=매도 정상 반영)
+            frgn_5d = sum(to_signed_int(d.get("frgn_ntby_qty", 0)) for d in items[:5])
+            frgn_20d = sum(to_signed_int(d.get("frgn_ntby_qty", 0)) for d in items[:20])
+            inst_5d = sum(to_signed_int(d.get("orgn_ntby_qty", 0)) for d in items[:5])
+            inst_20d = sum(to_signed_int(d.get("orgn_ntby_qty", 0)) for d in items[:20])
 
-            # 연속 외국인 순매수 일수 계산
+            # 연속 외국인 순매수 일수 (실제 양수인 날만 카운트)
             consec_days = 0
             for d in items:
-                val = to_int(d.get("frgn_ntby_qty", 0))
+                val = to_signed_int(d.get("frgn_ntby_qty", 0))
                 if val > 0:
                     consec_days += 1
                 else:
                     break
 
-            # 최근 5일 외국인 양수 일수
+            # 최근 5일 외국인 순매수 양수 일수
             frgn_positive_days = sum(
                 1 for d in items[:5]
-                if to_int(d.get("frgn_ntby_qty", 0)) > 0
+                if to_signed_int(d.get("frgn_ntby_qty", 0)) > 0
             )
 
             return {
@@ -211,15 +212,15 @@ async def fetch_foreign_realtime(code: str) -> dict:
                 return {}
             d = items[0]
 
-            def to_int(v):
+            def to_signed_int2(v):
                 try:
-                    return int(str(v).replace(",", "").replace("-", "0"))
+                    return int(str(v).replace(",", ""))
                 except Exception:
                     return 0
 
             return {
-                "frgn_today": to_int(d.get("frgn_ntby_qty", 0)),
-                "inst_today": to_int(d.get("orgn_ntby_qty", 0)),
+                "frgn_today": to_signed_int2(d.get("frgn_ntby_qty", 0)),
+                "inst_today": to_signed_int2(d.get("orgn_ntby_qty", 0)),
                 "date": d.get("stck_bsop_date", ""),
             }
     except Exception:
@@ -338,3 +339,170 @@ async def batch_fetch_charts(codes: list) -> dict:
             if isinstance(data, dict) and "bars" in data:
                 out[code] = data
     return out
+
+
+# ── 실시간 지수·업종·ETF 조회 (KIS API, KRX 대체) ─────────────────────────
+
+# 업종코드 매핑
+# KIS inquire-index-price: FID_COND_MRKT_DIV_CODE="U", FID_INPUT_ISCD=코드
+INDEX_CODES = {
+    "kospi":  ("U", "0001"),   # 코스피 종합
+    "kosdaq": ("U", "1001"),   # 코스닥 종합
+    "kospi200": ("U", "2001"), # 코스피200
+}
+
+# 섹터 업종코드 (코스피 업종)
+SECTOR_INDEX_CODES = {
+    "semiconductor": ("U", "0011"),   # 전기전자
+    "defense":       ("U", "0021"),   # 운수장비(방산 포함)
+    "healthcare":    ("U", "0027"),   # 의약품
+    "finance":       ("U", "0024"),   # 금융업
+    "steel":         ("U", "0007"),   # 철강금속
+    "battery":       ("U", "0011"),   # 전기전자 (배터리 포함)
+    "auto_ev":       ("U", "0021"),   # 운수장비
+    "renewable":     ("U", "0014"),   # 비금속광물 → 신재생 근접
+    "ai_platform":   ("U", "0011"),   # 전기전자
+}
+
+
+async def fetch_index_price(market_div: str, iscd: str, label: str) -> dict:
+    """
+    국내업종 현재지수 조회
+    TR_ID: FHPUP02100000
+    FID_COND_MRKT_DIV_CODE: U (업종)
+    FID_INPUT_ISCD: 0001(코스피), 1001(코스닥), 섹터코드 등
+    """
+    token = await get_token()
+    if not token:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                BASE_URL + "/uapi/domestic-stock/v1/quotations/inquire-index-price",
+                headers=_headers(token, "FHPUP02100000"),
+                params={
+                    "FID_COND_MRKT_DIV_CODE": market_div,
+                    "FID_INPUT_ISCD": iscd,
+                },
+            )
+            r.raise_for_status()
+            o = r.json().get("output", {})
+            if not o:
+                return {}
+
+            def tf(v):
+                try: return float(str(v).replace(",", ""))
+                except: return 0.0
+
+            prpr  = tf(o.get("bstp_nmix_prpr",  0))  # 현재지수
+            prdy  = tf(o.get("bstp_nmix_prdy_vrss", 0))  # 전일대비
+            rate  = tf(o.get("bstp_nmix_prdy_ctrt", 0))  # 등락률
+            vol   = tf(o.get("acml_vol", 0))             # 누적거래량
+            name  = o.get("hts_kor_isnm", label)         # 지수명
+
+            return {
+                "label":    label,
+                "name":     name,
+                "close":    prpr,
+                "chg":      prdy,
+                "chg_pct":  rate,
+                "volume":   vol,
+                "sign":     o.get("bstp_nmix_prdy_vrss_sign", ""),
+            }
+    except Exception:
+        return {}
+
+
+async def fetch_all_indices() -> dict:
+    """코스피·코스닥·코스피200 동시 조회"""
+    tasks = {
+        key: fetch_index_price(mc, ic, key)
+        for key, (mc, ic) in INDEX_CODES.items()
+    }
+    results = {}
+    fetched = await asyncio.gather(*tasks.values(), return_exceptions=True)
+    for key, val in zip(tasks.keys(), fetched):
+        if isinstance(val, dict) and val:
+            results[key] = val
+    return results
+
+
+async def fetch_sector_indices(sector_keys: list) -> dict:
+    """AI가 선정한 섹터의 업종지수 실시간 조회"""
+    unique = {}
+    for sk in sector_keys:
+        if sk in SECTOR_INDEX_CODES:
+            mc, ic = SECTOR_INDEX_CODES[sk]
+            unique[sk] = (mc, ic)
+
+    if not unique:
+        return {}
+
+    results = {}
+    for sk, (mc, ic) in unique.items():
+        await asyncio.sleep(0.05)
+        d = await fetch_index_price(mc, ic, sk)
+        if d:
+            results[sk] = d
+    return results
+
+
+async def fetch_etf_price(code: str, name: str) -> dict:
+    """ETF 현재가 조회 (종목코드 6자리)"""
+    token = await get_token()
+    if not token:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(
+                BASE_URL + "/uapi/domestic-stock/v1/quotations/inquire-price",
+                headers=_headers(token, "FHKST01010100"),
+                params={
+                    "fid_cond_mrkt_div_code": "J",
+                    "fid_input_iscd": code,
+                },
+            )
+            r.raise_for_status()
+            o = r.json().get("output", {})
+            def tf(v):
+                try: return float(str(v).replace(",", ""))
+                except: return 0.0
+            return {
+                "code":    code,
+                "name":    o.get("hts_kor_isnm", name),
+                "price":   tf(o.get("stck_prpr", 0)),
+                "chg_pct": tf(o.get("prdy_ctrt", 0)),
+                "volume":  tf(o.get("acml_vol", 0)),
+            }
+    except Exception:
+        return {}
+
+
+# 섹터별 대표 ETF 코드
+SECTOR_ETF_CODES = {
+    "semiconductor": ("091160", "KODEX 반도체"),
+    "defense":       ("443810", "TIGER 방산"),
+    "healthcare":    ("143860", "KODEX 바이오"),
+    "battery":       ("305720", "KODEX 2차전지산업"),
+    "auto_ev":       ("261060", "KODEX 자동차"),
+    "finance":       ("091170", "KODEX 은행"),
+    "renewable":     ("278540", "KODEX 글로벌클린에너지"),
+    "ai_platform":   ("364980", "TIGER Fn인터넷"),
+    "steel":         ("NONE",   ""),
+}
+
+
+async def fetch_sector_etfs(sector_keys: list) -> dict:
+    """AI 선정 섹터의 ETF 현재가 실시간 조회"""
+    results = {}
+    for sk in sector_keys:
+        if sk not in SECTOR_ETF_CODES:
+            continue
+        code, name = SECTOR_ETF_CODES[sk]
+        if code == "NONE":
+            continue
+        await asyncio.sleep(0.05)
+        d = await fetch_etf_price(code, name)
+        if d:
+            results[sk] = d
+    return results

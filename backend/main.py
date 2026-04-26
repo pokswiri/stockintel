@@ -12,11 +12,17 @@ from fastapi.responses import JSONResponse
 # KIS NEXUS Score 모듈 (키가 없으면 graceful 비활성화)
 try:
     from nexus import run_nexus
-    from kis_official import is_kis_available
+    from kis_official import (
+        is_kis_available, fetch_all_indices,
+        fetch_sector_indices, fetch_sector_etfs,
+    )
     _NEXUS_LOADED = True
 except Exception:
     _NEXUS_LOADED = False
     def is_kis_available(): return False
+    async def fetch_all_indices(): return {}
+    async def fetch_sector_indices(s): return {}
+    async def fetch_sector_etfs(s): return {}
 
 app = FastAPI(title="StockIntel API")
 app.add_middleware(
@@ -550,12 +556,42 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
     fallback = len(all_news) == 0
 
     # 2. AI 분석 + KRX 시장 데이터 병렬
-    today = datetime.now().strftime("%Y%m%d")
-    (analysis, ai_engine), krx_indices, krx_etfs = await asyncio.gather(
+    # KRX: 당일 데이터 없으면 직전 거래일(1~3일 이내) 자동 폴백
+    from datetime import timedelta
+    def _recent_trading_days(n=3):
+        days = []
+        d = datetime.now()
+        while len(days) < n:
+            if d.weekday() < 5:  # 월~금
+                days.append(d.strftime("%Y%m%d"))
+            d -= timedelta(days=1)
+        return days
+
+    trading_days = _recent_trading_days(3)
+    today = trading_days[0]
+
+    async def fetch_krx_indices_with_fallback():
+        for day in trading_days:
+            r = await fetch_krx_indices(day)
+            if r:
+                return r
+        return {}
+
+    async def fetch_krx_etf_with_fallback():
+        for day in trading_days:
+            r = await fetch_krx_etf_sector(day)
+            if r:
+                return r
+        return {}
+
+    # KIS API로 실시간 지수 조회 (KRX 대체)
+    async def _empty(): return {}
+    (analysis, ai_engine), kis_indices = await asyncio.gather(
         run_analysis(all_news, hours),
-        fetch_krx_indices(today),
-        fetch_krx_etf_sector(today),
+        fetch_all_indices() if is_kis_available() else _empty(),
     )
+    krx_indices = kis_indices  # 변수명 호환 유지
+    krx_etfs    = {}
 
     # 3. AI 추천 섹터 추출 (NEXUS 입력용)
     kr_sectors = analysis.get("kr_market", {}).get("sectors", [])
@@ -574,14 +610,27 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         if code and code in krx_market:
             s["price_data"] = krx_market[code]
 
-    # 5. NEXUS Score 파이프라인 (KIS API 키 있을 때만)
+    # 5. NEXUS Score + 섹터 ETF/업종지수 실시간 (KIS API)
     nexus_result = None
+    sector_etfs_live = {}
+    sector_indices_live = {}
+
     if _NEXUS_LOADED and is_kis_available() and sector_names:
         try:
-            nexus_result = await asyncio.wait_for(
-                run_nexus(sector_names, top_n=3),
-                timeout=60.0,
+            # 섹터 ETF, 업종지수, NEXUS Score 병렬 실행
+            nexus_result, sector_etfs_live, sector_indices_live = await asyncio.gather(
+                asyncio.wait_for(run_nexus(sector_names, top_n=3), timeout=60.0),
+                fetch_sector_etfs(sector_names),
+                fetch_sector_indices(sector_names),
+                return_exceptions=True,
             )
+            # 예외 처리
+            if isinstance(nexus_result, Exception):
+                nexus_result = {"available": False, "message": str(nexus_result)}
+            if isinstance(sector_etfs_live, Exception):
+                sector_etfs_live = {}
+            if isinstance(sector_indices_live, Exception):
+                sector_indices_live = {}
         except asyncio.TimeoutError:
             nexus_result = {"available": False, "message": "NEXUS 분석 시간 초과"}
         except Exception as e:
@@ -601,6 +650,8 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         "market_index": krx_indices,
         "sector_etfs": krx_etfs,
         "nexus": nexus_result,
+        "sector_etfs_live": sector_etfs_live,
+        "sector_indices_live": sector_indices_live,
         "bet_timing": _get_bet_timing(),
         "kis_available": is_kis_available(),
     }
