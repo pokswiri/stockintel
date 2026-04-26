@@ -164,35 +164,33 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
         except Exception as e:
             errors.append({"code": code, "error": str(e)})
 
-    # ── 7. HIGH 우선 + MID(60점↑) 보충으로 최대 top_n개 ──
+    # ── 7. HIGH 우선 + MID 보충으로 최대 top_n개 ──────────
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
 
+    # 등급별 분류 (순서 중요: 먼저 분류 후 사용)
     high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
-    # MID 중 60점 이상만 보충 대상 (품질 최저선)
-    mid_qual  = [s for s in scored if s["nexus"]["grade"] == "MID"
-                 and s["nexus"]["total"] >= 60]
     mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
     low_list  = [s for s in scored if s["nexus"]["grade"] == "LOW"]
 
-    # HIGH 우선 채우고 부족하면 MID(60점↑)로 보충
+    # HIGH 우선 채우고 부족하면 MID로 보충
+    # 주말/장외에도 등급 기준 불변 (HIGH=65↑, MID=50~64)
+    # MID는 점수 높은 순으로 보충 (mid_list는 이미 scored 정렬 상태)
     final_top = list(high_list[:top_n])
     if len(final_top) < top_n:
-        needed = top_n - len(final_top)
-        # 이미 포함된 종목 제외하고 MID 보충
+        needed   = top_n - len(final_top)
         top_codes = {s["code"] for s in final_top}
-        supplement = [s for s in mid_qual if s["code"] not in top_codes]
+        supplement = [s for s in mid_list if s["code"] not in top_codes]
         final_top += supplement[:needed]
 
-    # 각 항목에 표시 등급 태그 추가 (프론트 구분용)
+    # 각 항목에 표시 등급 태그 추가 (프론트 뱃지 구분용)
     for s in final_top:
-        s["display_grade"] = s["nexus"]["grade"]  # HIGH or MID
+        s["display_grade"] = s["nexus"]["grade"]  # "HIGH" or "MID"
 
     # 통계 정보
     grade_counts = {
-        "HIGH":     len(high_list),
-        "MID":      len(mid_list),
-        "MID_QUAL": len(mid_qual),   # 60점↑ MID 수
-        "LOW":      len(low_list),
+        "HIGH": len(high_list),
+        "MID":  len(mid_list),
+        "LOW":  len(low_list),
     }
 
     return {
