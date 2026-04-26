@@ -313,8 +313,14 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
       <div class="lbl">추천 섹터</div>
       <div class="card" id="kr-sec"></div>
       <div id="nx-section" style="display:none">
-        <div class="lbl">🔴 NEXUS Score — 시세 분출 후보</div>
+        <div class="lbl" id="nx-label">🔴 NEXUS Score — 시세 분출 후보</div>
         <div id="nx-cards"></div>
+        <div id="nx-empty" style="display:none" class="card">
+          <div style="color:var(--txt3);font-size:13px;padding:4px 0;text-align:center">
+            현재 조건을 충족하는 HIGH 등급 종목이 없습니다.<br>
+            <span style="font-size:11px">장중 재분석 시 수급 데이터가 반영됩니다.</span>
+          </div>
+        </div>
       </div>
       <div class="lbl">AI 추천 종목</div>
       <div class="card" id="kr-stk"></div>
@@ -504,13 +510,30 @@ function render(data){
       </div>
     </div>` : '';
 
-  if (nx && nx.available && nx.top && nx.top.length > 0) {
-    document.getElementById('nx-section').style.display = 'block';
-    document.getElementById('nx-cards').innerHTML = nx.top.map(s => renderNexusCard(s)).join('');
-    // 캔들차트 그리기 (DOM 삽입 후)
-    setTimeout(() => {
-      nx.top.forEach(s => drawCandles(s.code, s.nexus.candles));
-    }, 100);
+  // NEXUS 섹션 렌더링
+  document.getElementById('nx-section').style.display = 'block';
+
+  if (nx && nx.available) {
+    const gc = nx.grade_counts || {};
+    const totalScanned = nx.scored_count || 0;
+    const highCnt = gc.HIGH || 0;
+    const midCnt  = gc.MID  || 0;
+
+    // 라벨 업데이트
+    const lbl = document.getElementById('nx-label');
+    const anchors = (nx.anchor_sectors || []).join('·');
+    lbl.innerHTML = `🔴 NEXUS Score — 시세 분출 후보 <span style="font-size:10px;color:var(--txt3);font-weight:400">${totalScanned}개 스캔 · HIGH ${highCnt} MID ${midCnt}</span>`;
+
+    if (nx.top && nx.top.length > 0) {
+      document.getElementById('nx-cards').innerHTML = nx.top.map(s => renderNexusCard(s)).join('');
+      document.getElementById('nx-empty').style.display = 'none';
+      setTimeout(() => {
+        nx.top.forEach(s => drawCandles(s.code, s.nexus.candles));
+      }, 100);
+    } else {
+      document.getElementById('nx-cards').innerHTML = '';
+      document.getElementById('nx-empty').style.display = 'block';
+    }
   } else {
     document.getElementById('nx-section').style.display = 'none';
   }
@@ -552,6 +575,7 @@ function renderNexusCard(s) {
         <div class="nx-sub">
           <span class="nx-code">${esc(s.code)}</span>
           <span class="nx-sector">${esc(s.sector_key)}</span>
+          ${s.source === 'anchor' ? '<span style="font-size:10px;color:var(--txt3)">⚓보완</span>' : '<span style="font-size:10px;color:var(--amber)">📰주목</span>'}
           ${bd.frgn?.dual_buy ? '<span style="font-size:10px;color:var(--teal)">🤝 외인+기관</span>' : ''}
         </div>
       </div>
