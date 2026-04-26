@@ -9,6 +9,15 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+# KIS NEXUS Score 모듈 (키가 없으면 graceful 비활성화)
+try:
+    from nexus import run_nexus
+    from kis_official import is_kis_available
+    _NEXUS_LOADED = True
+except Exception:
+    _NEXUS_LOADED = False
+    def is_kis_available(): return False
+
 app = FastAPI(title="StockIntel API")
 app.add_middleware(
     CORSMiddleware,
@@ -25,6 +34,8 @@ GOOGLE_CX     = os.getenv("GOOGLE_CX", "")
 NAVER_ID      = os.getenv("NAVER_CLIENT_ID", "")
 NAVER_SECRET  = os.getenv("NAVER_CLIENT_SECRET", "")
 KRX_AUTH_KEY  = os.getenv("KRX_AUTH_KEY", "")
+KIS_APP_KEY   = os.getenv("KIS_APP_KEY", "")
+KIS_APP_SECRET= os.getenv("KIS_APP_SECRET", "")
 
 KEYWORDS_EN = [
     '"Trump" tariff OR trade 2026',
@@ -310,13 +321,12 @@ async def fetch_krx_etf_sector(today: str) -> dict:
 
 def build_news_text(news_items: list) -> str:
     text = ""
-    for i, item in enumerate(news_items[:30], 1):
+    for i, item in enumerate(news_items[:20], 1):
         lang = "[EN]" if item.get("lang") == "en" else "[KO]"
-        text += str(i) + ". " + lang + " " + item.get("title", "") + "\n"
-        if item.get("snippet"):
-            text += "   " + item["snippet"][:100] + "\n"
-        if item.get("link"):
-            text += "   URL: " + item["link"] + "\n"
+        url = item.get("link", "")
+        text += str(i) + ". " + lang + " " + item.get("title", "")
+        if url:
+            text += " | " + url
         text += "\n"
     return text
 
@@ -339,94 +349,19 @@ def build_prompt(news_items: list, hours: int) -> str:
     )
 
     prompt = (
-        "You are a professional Korean stock market analyst.\n"
-        "Read the news articles carefully and generate a JSON analysis.\n"
-        "Return ONLY raw JSON. No markdown, no code fences, no explanation text.\n\n"
-
-        "=== OUTPUT FORMAT ===\n"
-        "Generate a JSON object with these exact keys:\n"
-        "summary, key_issues, top_news, us_market, kr_market, risks\n\n"
-
-        "summary: object with keys:\n"
-        "  headline (string, Korean, under 30 chars)\n"
-        "  sentiment (string: bullish OR bearish OR neutral)\n"
-        "  score (integer: -100 to 100)\n"
-        "  market_overview (string, Korean, 3 sentences)\n\n"
-
-        "key_issues: array of 3 to 5 objects, each with keys:\n"
-        "  category (string: person_statement OR economic_indicator OR geopolitics OR commodity OR corporate)\n"
-        "  person_or_event (string: name of person or event)\n"
-        "  title (string, Korean)\n"
-        "  detail (string, Korean, 3 sentences)\n"
-        "  impact (string: positive OR negative OR neutral)\n"
-        "  affected_sectors (array of 2 Korean sector name strings)\n"
-        "  news_url (string: actual URL copied from news list)\n\n"
-
-        "top_news: array of EXACTLY 5 objects, each with keys:\n"
-        "  title (string, Korean translation if English)\n"
-        "  url (string: actual URL from the news list - REQUIRED)\n"
-        "  source (string: media outlet name)\n"
-        "  lang (string: en OR ko)\n"
-        "  impact (string: positive OR negative OR neutral)\n"
-        "  category (string: person_statement OR economic_indicator OR geopolitics OR commodity OR corporate OR market)\n"
-        "  summary (string, Korean, 2-3 sentences including investment implication)\n\n"
-
-        "us_market: object with keys:\n"
-        "  outlook (string, Korean, 2 sentences)\n"
-        "  sectors: array of 2 to 3 objects, each with keys:\n"
-        "    name (string: English sector name)\n"
-        "    name_ko (string: Korean sector name)\n"
-        "    etf (string: representative ETF ticker)\n"
-        "    strength (integer: 1 to 5)\n"
-        "    signal (string: buy OR hold OR watch)\n"
-        "    news_trigger (string: specific news headline that caused this recommendation)\n"
-        "    reason (string, Korean, 2 sentences)\n"
-        "  stocks: array of EXACTLY 2 objects, each with keys:\n"
-        "    ticker (string: real NYSE/NASDAQ ticker)\n"
-        "    name (string: company name)\n"
-        "    sector (string: which sector above)\n"
-        "    signal (string: buy OR hold OR watch)\n"
-        "    news_trigger (string: specific news that triggered this)\n"
-        "    reason (string, Korean, 2 sentences)\n"
-        "    risk (string: low OR medium OR high)\n\n"
-
-        "kr_market: object with keys:\n"
-        "  outlook (string, Korean, 2 sentences)\n"
-        "  sectors: array of 2 to 3 objects, each with keys:\n"
-        "    name (string: Korean sector name)\n"
-        "    strength (integer: 1 to 5)\n"
-        "    signal (string: buy OR hold OR watch)\n"
-        "    news_trigger (string: ONE specific news headline from the news list that directly caused this sector recommendation)\n"
-        "    reason (string, Korean, 2 sentences explaining the news-to-sector connection)\n"
-        "    key_stocks (array of exactly 2 Korean company name strings: first=large cap leader, second=mid cap)\n"
-        "  stocks: array of EXACTLY 2 objects picked from KNOWN KOREAN STOCKS list above.\n"
-        "    IMPORTANT: stock[0] must be the large-cap leader of the top recommended sector.\n"
-        "    IMPORTANT: stock[1] must be a mid-cap stock from the same or second sector.\n"
-        "    IMPORTANT: Do NOT always pick Samsung/SK Hynix. Choose based on which sector the news points to.\n"
-        "    Each stock object has these keys:\n"
-        "    code (string: 6-digit code from KNOWN KOREAN STOCKS)\n"
-        "    isin (string: KR7 format ISIN from KNOWN KOREAN STOCKS)\n"
-        "    name (string: company name from KNOWN KOREAN STOCKS)\n"
-        "    sector (string: Korean sector name from sectors above)\n"
-        "    signal (string: buy OR hold OR watch)\n"
-        "    news_trigger (string: ONE specific news headline that triggered this stock pick)\n"
-        "    reason (string, Korean, 2 sentences: explain why THIS stock in THIS sector based on the news)\n"
-        "    risk (string: low OR medium OR high)\n"
-        "    target_price (string: number only, no commas)\n\n"
-
-        "risks: array of 2 to 3 objects, each with keys:\n"
-        "  title (string, Korean)\n"
-        "  detail (string, Korean, 2-3 sentences)\n"
-        "  severity (string: high OR medium OR low)\n"
-        "  related_sectors (array of Korean sector name strings)\n\n"
-
-        "=== KNOWN KOREAN STOCKS (name:code:isin) ===\n"
+        "Korean stock analyst. Return ONLY valid JSON, no markdown.\n\n"
+        "JSON keys: summary, key_issues, top_news, us_market, kr_market, risks\n\n"
+        "summary: {headline(Korean,<30chars), sentiment(bullish/bearish/neutral), score(-100to100), market_overview(Korean,3sentences)}\n"
+        "key_issues: array[3-4] {category(person_statement/economic_indicator/geopolitics/commodity/corporate), person_or_event, title(Korean), detail(Korean,2sentences), impact(positive/negative/neutral), affected_sectors[2], news_url}\n"
+        "top_news: array[5] {title(Korean), url(from news list), source, lang(en/ko), impact(positive/negative/neutral), category, summary(Korean,2sentences)}\n"
+        "us_market: {outlook(Korean,2sentences), sectors[2-3]{name,name_ko,etf,strength(1-5),signal(buy/hold/watch),news_trigger,reason(Korean,1sentence)}, stocks[2]{ticker,name,sector,signal,news_trigger,reason(Korean,1sentence),risk(low/medium/high)}}\n"
+        "kr_market: {outlook(Korean,2sentences), sectors[2-3]{name,strength(1-5),signal,news_trigger,reason(Korean,1sentence),key_stocks[2]}, stocks[2]{code(6digits),isin(KR7format),name,sector,signal,news_trigger,reason(Korean,1sentence),risk,target_price}}\n"
+        "risks: array[2-3] {title(Korean), detail(Korean,2sentences), severity(high/medium/low), related_sectors[1-2]}\n\n"
+        "STOCK RULES: kr stocks[0]=large cap of top sector, stocks[1]=mid cap. Pick from: "
         + kr_ref + "\n\n"
-
-        "=== NEWS ARTICLES (" + str(count) + " articles, last " + str(hours) + " hours) ===\n\n"
+        "NEWS (last " + str(hours) + "h):\n"
         + news_text
-        + "\n=== END OF NEWS ===\n"
-        "Now generate the JSON analysis based on the news above:"
+        + "\nGenerate JSON:"
     )
     return prompt
 
@@ -464,7 +399,7 @@ async def analyze_gemini(prompt: str) -> dict:
 
 async def analyze_groq(prompt: str) -> dict:
     body = {
-        "model": "llama-3.3-70b-versatile",
+        "model": "mixtral-8x7b-32768",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
         "max_tokens": 4000,
@@ -536,8 +471,26 @@ async def run_analysis(news: list, hours: int):
     raise RuntimeError("All AI failed: " + " | ".join(errors))
 
 
+def _get_bet_timing() -> dict:
+    """현재 시각 기준 종가 베팅 타이밍 안내"""
+    now = datetime.now()
+    h, m = now.hour, now.minute
+    total_min = h * 60 + m
+    if total_min < 9 * 60:
+        return {"label": "장 전", "msg": "오늘 장 시작 전입니다. 어제 기준 분석입니다.", "highlight": False}
+    elif total_min < 14 * 60 + 30:
+        return {"label": "장중", "msg": "장 마감 전 재분석 시 당일 수급이 반영됩니다.", "highlight": False}
+    elif total_min < 15 * 60 + 20:
+        return {"label": "🔔 종가 베팅 타임", "msg": "종가 매수 검토 시간입니다. 추천 종목 현재가를 확인하세요.", "highlight": True}
+    elif total_min < 15 * 60 + 30:
+        return {"label": "장마감 직전", "msg": "장 마감 5분 전입니다.", "highlight": False}
+    else:
+        return {"label": "장 마감", "msg": "오늘 종가 기준입니다. 내일 시초가 전략을 고려하세요.", "highlight": False}
+
+
 @app.get("/analyze")
 async def analyze(hours: int = Query(default=24, ge=1, le=168)):
+    # 1. 뉴스 수집
     google_news, naver_news = await asyncio.gather(
         fetch_google_news(hours),
         fetch_naver_news(),
@@ -545,29 +498,43 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
     all_news = dedup_news(google_news + naver_news)
     fallback = len(all_news) == 0
 
-    analysis, ai_engine = await run_analysis(all_news, hours)
-
-    kr_stocks = analysis.get("kr_market", {}).get("stocks", [])
+    # 2. AI 분석 + KRX 시장 데이터 병렬
     today = datetime.now().strftime("%Y%m%d")
-
-    # Fetch market data in parallel (stocks + indices + ETFs)
-    krx_market, krx_indices, krx_etfs = await asyncio.gather(
-        fetch_krx_market(today),
+    (analysis, ai_engine), krx_indices, krx_etfs = await asyncio.gather(
+        run_analysis(all_news, hours),
         fetch_krx_indices(today),
         fetch_krx_etf_sector(today),
     )
 
-    # Match AI-recommended stocks with real KRX data
+    # 3. AI 추천 섹터 추출 (NEXUS 입력용)
+    kr_sectors = analysis.get("kr_market", {}).get("sectors", [])
+    sector_names = [s.get("name", "") for s in kr_sectors if s.get("name")]
+
+    # 4. KRX 시장 데이터로 AI 추천 종목 주가 보완
+    krx_market = {}
+    try:
+        krx_market = await fetch_krx_market(today)
+    except Exception:
+        pass
+
+    kr_stocks = analysis.get("kr_market", {}).get("stocks", [])
     for s in kr_stocks:
         code = s.get("code", "")
         if code and code in krx_market:
             s["price_data"] = krx_market[code]
-        elif code:
-            # Try ISIN fallback: find by code in market data
-            for mcode, mdata in krx_market.items():
-                if mcode == code or mdata.get("code", "") == code:
-                    s["price_data"] = mdata
-                    break
+
+    # 5. NEXUS Score 파이프라인 (KIS API 키 있을 때만)
+    nexus_result = None
+    if _NEXUS_LOADED and is_kis_available() and sector_names:
+        try:
+            nexus_result = await asyncio.wait_for(
+                run_nexus(sector_names, top_n=3),
+                timeout=45.0,
+            )
+        except asyncio.TimeoutError:
+            nexus_result = {"available": False, "message": "NEXUS 분석 시간 초과"}
+        except Exception as e:
+            nexus_result = {"available": False, "message": str(e)}
 
     return {
         "analyzed_at": datetime.now().isoformat(),
@@ -582,6 +549,9 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         "analysis": analysis,
         "market_index": krx_indices,
         "sector_etfs": krx_etfs,
+        "nexus": nexus_result,
+        "bet_timing": _get_bet_timing(),
+        "kis_available": is_kis_available(),
     }
 
 
@@ -596,10 +566,11 @@ def health():
             "google": bool(GOOGLE_KEY and GOOGLE_CX),
             "naver": bool(NAVER_ID and NAVER_SECRET),
             "krx": bool(KRX_AUTH_KEY),
+            "kis": bool(KIS_APP_KEY and KIS_APP_SECRET),
         },
     }
 
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "StockIntel", "version": "3.0"}
+    return {"status": "ok", "service": "StockIntel", "version": "4.0"}
