@@ -26,6 +26,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+async def startup_event():
+    """서버 시작 시 pykis 백그라운드 초기화 (첫 분석 속도 향상)"""
+    if _NEXUS_LOADED and is_kis_available():
+        try:
+            from kis_client import get_kis
+            asyncio.create_task(get_kis())
+        except Exception:
+            pass
+
 GEMINI_KEY    = os.getenv("GEMINI_API_KEY", "")
 GROQ_KEY      = os.getenv("GROQ_API_KEY", "")
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -349,19 +360,27 @@ def build_prompt(news_items: list, hours: int) -> str:
     )
 
     prompt = (
-        "Korean stock analyst. Return ONLY valid JSON, no markdown.\n\n"
-        "JSON keys: summary, key_issues, top_news, us_market, kr_market, risks\n\n"
-        "summary: {headline(Korean,<30chars), sentiment(bullish/bearish/neutral), score(-100to100), market_overview(Korean,3sentences)}\n"
-        "key_issues: array[3-4] {category(person_statement/economic_indicator/geopolitics/commodity/corporate), person_or_event, title(Korean), detail(Korean,2sentences), impact(positive/negative/neutral), affected_sectors[2], news_url}\n"
-        "top_news: array[5] {title(Korean), url(from news list), source, lang(en/ko), impact(positive/negative/neutral), category, summary(Korean,2sentences)}\n"
-        "us_market: {outlook(Korean,2sentences), sectors[2-3]{name,name_ko,etf,strength(1-5),signal(buy/hold/watch),news_trigger,reason(Korean,1sentence)}, stocks[2]{ticker,name,sector,signal,news_trigger,reason(Korean,1sentence),risk(low/medium/high)}}\n"
-        "kr_market: {outlook(Korean,2sentences), sectors[2-3]{name,strength(1-5),signal,news_trigger,reason(Korean,1sentence),key_stocks[2]}, stocks[2]{code(6digits),isin(KR7format),name,sector,signal,news_trigger,reason(Korean,1sentence),risk,target_price}}\n"
-        "risks: array[2-3] {title(Korean), detail(Korean,2sentences), severity(high/medium/low), related_sectors[1-2]}\n\n"
-        "STOCK RULES: kr stocks[0]=large cap of top sector, stocks[1]=mid cap. Pick from: "
+        "You are a Korean stock market analyst. Analyze the news below and return ONLY a JSON object. No explanation, no markdown, no code blocks.\n\n"
+        "CRITICAL: All text fields marked (Korean) MUST be written in Korean (한국어). DO NOT use empty strings or spaces for Korean fields.\n\n"
+        "Required JSON structure:\n"
+        "{\n"
+        "  \"summary\": {\n"
+        "    \"headline\": \"(Korean, max 30 chars, e.g. 코스피 상승세 지속)\",\n"
+        "    \"sentiment\": \"bullish|bearish|neutral\",\n"
+        "    \"score\": -100 to 100,\n"
+        "    \"market_overview\": \"(Korean, 2-3 sentences about current market)\",\n"
+        "  },\n"
+        "  \"key_issues\": [ 3-4 items: {category, person_or_event(Korean name), title(Korean), detail(Korean 2 sentences), impact, affected_sectors[2], news_url} ],\n"
+        "  \"top_news\": [ 5 items: {title(Korean), url, source, lang:\"ko\", impact, category, summary(Korean 2 sentences)} ],\n"
+        "  \"us_market\": { outlook(Korean 2 sentences), sectors[2-3]{name,name_ko(Korean),etf,strength(1-5),signal,news_trigger(Korean),reason(Korean)}, stocks[2]{ticker,name,sector,signal,news_trigger(Korean),reason(Korean),risk} },\n"
+        "  \"kr_market\": { outlook(Korean 2 sentences), sectors[2-3]{name,strength(1-5),signal,news_trigger(Korean),reason(Korean),key_stocks[2 codes]}, stocks[2]{code(6digits),isin,name(Korean),sector,signal,news_trigger(Korean),reason(Korean),risk,target_price} },\n"
+        "  \"risks\": [ 2-3 items: {title(Korean), detail(Korean 2 sentences), severity:high|medium|low, related_sectors[1-2]} ]\n"
+        "}\n\n"
+        "Korean domestic stock pick rule: stocks[0]=large cap, stocks[1]=mid cap. Available: "
         + kr_ref + "\n\n"
         "NEWS (last " + str(hours) + "h):\n"
         + news_text
-        + "\nGenerate JSON:"
+        + "\nJSON:"
     )
     return prompt
 
@@ -549,7 +568,7 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         try:
             nexus_result = await asyncio.wait_for(
                 run_nexus(sector_names, top_n=3),
-                timeout=45.0,
+                timeout=60.0,
             )
         except asyncio.TimeoutError:
             nexus_result = {"available": False, "message": "NEXUS 분석 시간 초과"}
