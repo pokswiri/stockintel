@@ -603,8 +603,7 @@ async function go(){
     if(d.error)throw new Error(d.error);
     d._health=h;render(d);
   }catch(e){
-    showErr(e.name==='TimeoutError'?'서버 응답 시간 초과
-잠시 후 다시 시도해 주세요':e.message||'알 수 없는 오류');
+    showErr(e.name==='TimeoutError'?'서버 응답 시간 초과. 잠시 후 다시 시도해 주세요':e.message||'알 수 없는 오류');
   }
 }
 </script>
