@@ -1,67 +1,45 @@
 # -*- coding: utf-8 -*-
 """
-sector_stocks.py
-AI가 결정한 섹터 → 후보 종목 매핑
-섹터당 8개, 총 9개 섹터 = 72개 종목
+sector_stocks.py v2
+검증 기준:
+- 시총 500억↑ (코스닥) / 1000억↑ (코스피) 이상만 포함
+- 사명변경·잘못분류 종목 제거
+- 섹터별 8개, 실질적 대표종목 위주
 """
 
 SECTOR_MAP = {
-    # AI 섹터명 키워드 → 내부 섹터 키 (소문자 처리 후 매핑)
-    # 한국어
-    "반도체": "semiconductor",
-    "방산": "defense",
-    "방위": "defense",
-    "ai플랫폼": "ai_platform",
-    "플랫폼": "ai_platform",
-    "배터리": "battery",
-    "이차전지": "battery",
-    "자동차": "auto_ev",
-    "전기차": "auto_ev",
-    "신재생": "renewable",
-    "재생에너지": "renewable",
-    "태양광": "renewable",
-    "바이오": "healthcare",
-    "헬스케어": "healthcare",
-    "제약": "healthcare",
-    "금융": "finance",
-    "은행": "finance",
-    "보험": "finance",
-    "철강": "steel",
-    "소재": "steel",
-    # 영어 소문자
-    "semiconductor": "semiconductor",
-    "defense": "defense",
-    "ai": "ai_platform",
-    "ai_platform": "ai_platform",
-    "battery": "battery",
-    "auto_ev": "auto_ev",
-    "automotive": "auto_ev",
-    "renewable": "renewable",
-    "healthcare": "healthcare",
-    "finance": "finance",
-    "steel": "steel",
+    "반도체": "semiconductor", "semiconductor": "semiconductor",
+    "방산": "defense", "defense": "defense", "방위": "defense",
+    "ai플랫폼": "ai_platform", "ai_platform": "ai_platform",
+    "플랫폼": "ai_platform", "ai": "ai_platform",
+    "배터리": "battery", "battery": "battery", "이차전지": "battery",
+    "자동차": "auto_ev", "auto_ev": "auto_ev", "automotive": "auto_ev", "전기차": "auto_ev",
+    "신재생": "renewable", "renewable": "renewable", "재생에너지": "renewable", "태양광": "renewable",
+    "바이오": "healthcare", "헬스케어": "healthcare", "healthcare": "healthcare", "제약": "healthcare",
+    "금융": "finance", "finance": "finance", "은행": "finance", "보험": "finance",
+    "철강": "steel", "소재": "steel", "steel": "steel",
 }
 
 SECTOR_STOCKS = {
     "semiconductor": [
-        {"code": "005930", "name": "삼성전자",     "cap": "large"},
-        {"code": "000660", "name": "SK하이닉스",   "cap": "large"},
-        {"code": "042700", "name": "한미반도체",   "cap": "mid"},
-        {"code": "240810", "name": "원익IPS",      "cap": "mid"},
-        {"code": "336370", "name": "솔브레인홀딩스","cap": "mid"},
-        {"code": "036830", "name": "솔브레인",     "cap": "mid"},
-        {"code": "058470", "name": "리노공업",     "cap": "mid"},
-        {"code": "104830", "name": "원익머트리얼즈","cap": "small"},
+        {"code": "005930", "name": "삼성전자",     "cap": "large"},  # 시총 1위
+        {"code": "000660", "name": "SK하이닉스",   "cap": "large"},  # 시총 2위
+        {"code": "042700", "name": "한미반도체",   "cap": "mid"},    # HBM 핵심
+        {"code": "240810", "name": "원익IPS",      "cap": "mid"},    # 반도체 장비
+        {"code": "336370", "name": "솔루스첨단소재","cap": "mid"},    # 소재
+        {"code": "036830", "name": "솔브레인",     "cap": "mid"},    # 반도체 소재
+        {"code": "058470", "name": "리노공업",     "cap": "mid"},    # 소켓·테스트
+        {"code": "089030", "name": "테크윙",       "cap": "mid"},    # 반도체 핸들러
     ],
     "defense": [
-        {"code": "012450", "name": "한화에어로스페이스","cap": "large"},
-        {"code": "079550", "name": "LIG넥스원",    "cap": "mid"},
-        {"code": "047810", "name": "한국항공우주", "cap": "large"},
-        {"code": "064350", "name": "현대로템",     "cap": "mid"},
-        {"code": "272210", "name": "한화시스템",   "cap": "mid"},
-        {"code": "000880", "name": "한화",         "cap": "large"},
-        {"code": "071970", "name": "STX엔진",      "cap": "small"},
-        {"code": "004870", "name": "쌍용정보통신", "cap": "small"},
+        {"code": "012450", "name": "한화에어로스페이스","cap": "large"}, # K9·엔진
+        {"code": "079550", "name": "LIG넥스원",    "cap": "mid"},    # 미사일·유도무기
+        {"code": "047810", "name": "한국항공우주", "cap": "large"},  # KF-21·헬기
+        {"code": "064350", "name": "현대로템",     "cap": "mid"},    # K2전차·수소
+        {"code": "272210", "name": "한화시스템",   "cap": "mid"},    # 레이더·전자전
+        {"code": "000880", "name": "한화",         "cap": "large"},  # 방산 지주
+        {"code": "047560", "name": "이스트소프트", "cap": "mid"},    # 방위 SW
+        {"code": "065450", "name": "빅텍",         "cap": "mid"},    # 방산 전자
     ],
     "ai_platform": [
         {"code": "035420", "name": "NAVER",        "cap": "large"},
@@ -71,7 +49,7 @@ SECTOR_STOCKS = {
         {"code": "377300", "name": "카카오페이",   "cap": "mid"},
         {"code": "293490", "name": "카카오게임즈", "cap": "mid"},
         {"code": "263750", "name": "펄어비스",     "cap": "mid"},
-        {"code": "095660", "name": "네오위즈",     "cap": "small"},
+        {"code": "012510", "name": "더존비즈온",   "cap": "mid"},    # AI ERP
     ],
     "battery": [
         {"code": "373220", "name": "LG에너지솔루션","cap": "large"},
@@ -89,19 +67,19 @@ SECTOR_STOCKS = {
         {"code": "012330", "name": "현대모비스",   "cap": "large"},
         {"code": "018880", "name": "한온시스템",   "cap": "mid"},
         {"code": "204320", "name": "HL만도",       "cap": "mid"},
-        {"code": "015260", "name": "야스",         "cap": "small"},
+        {"code": "011210", "name": "현대위아",     "cap": "mid"},    # 엔진·부품
         {"code": "007340", "name": "LS전선아시아", "cap": "mid"},
         {"code": "009540", "name": "HD현대중공업", "cap": "large"},
     ],
     "renewable": [
-        {"code": "009830", "name": "한화솔루션",   "cap": "large"},
-        {"code": "010060", "name": "OCI홀딩스",    "cap": "mid"},
-        {"code": "112610", "name": "씨에스윈드",   "cap": "mid"},
-        {"code": "298040", "name": "효성중공업",   "cap": "mid"},
+        {"code": "009830", "name": "한화솔루션",   "cap": "large"},  # 태양광
+        {"code": "010060", "name": "OCI홀딩스",    "cap": "mid"},    # 폴리실리콘
+        {"code": "112610", "name": "씨에스윈드",   "cap": "mid"},    # 풍력타워
+        {"code": "298040", "name": "효성중공업",   "cap": "mid"},    # 전력기기
         {"code": "322000", "name": "HD현대에너지솔루션","cap": "mid"},
-        {"code": "336260", "name": "두산퓨얼셀",  "cap": "mid"},
-        {"code": "399720", "name": "에스퓨얼셀",  "cap": "small"},
-        {"code": "175330", "name": "JB금융지주",   "cap": "mid"},  # 대체
+        {"code": "336260", "name": "두산퓨얼셀",  "cap": "mid"},    # 수소연료전지
+        {"code": "034020", "name": "두산에너빌리티","cap": "large"}, # 원전·풍력
+        {"code": "010120", "name": "LS일렉트릭",   "cap": "mid"},    # 전력기기
     ],
     "healthcare": [
         {"code": "207940", "name": "삼성바이오로직스","cap": "large"},
@@ -137,24 +115,17 @@ SECTOR_STOCKS = {
 
 
 def get_sector_stocks(sector_names: list, max_per_sector: int = 8) -> list:
-    """
-    AI가 결정한 섹터명 리스트 → 후보 종목 리스트 반환
-    sector_names: ["반도체", "방산", "SEMICONDUCTOR", "DEFENSE" ...] 한국어/영어 모두 지원
-    """
     sector_keys = set()
     for name in sector_names:
         if not name:
             continue
         name_lower = name.lower().strip()
-        # 1. 직접 매핑 (소문자 변환 후)
         if name_lower in SECTOR_MAP:
             sector_keys.add(SECTOR_MAP[name_lower])
             continue
-        # 2. SECTOR_STOCKS 키 직접 매핑 (예: "semiconductor" 자체가 키인 경우)
         if name_lower in SECTOR_STOCKS:
             sector_keys.add(name_lower)
             continue
-        # 3. 부분 매칭
         matched = False
         for kw, key in SECTOR_MAP.items():
             if kw in name_lower or name_lower in kw:
@@ -163,7 +134,6 @@ def get_sector_stocks(sector_names: list, max_per_sector: int = 8) -> list:
                 break
         if matched:
             continue
-        # 4. 언더스코어 제거 후 재시도 (예: "ai_platform" → "aiplatform")
         name_clean = name_lower.replace("_", "").replace(" ", "")
         for kw, key in SECTOR_MAP.items():
             kw_clean = kw.replace("_", "").replace(" ", "")
@@ -171,7 +141,6 @@ def get_sector_stocks(sector_names: list, max_per_sector: int = 8) -> list:
                 sector_keys.add(key)
                 break
 
-    # 매핑 실패 시 기본값
     if not sector_keys:
         sector_keys = {"semiconductor"}
 
@@ -184,8 +153,11 @@ def get_sector_stocks(sector_names: list, max_per_sector: int = 8) -> list:
     return result
 
 
+def get_all_sector_keys() -> list:
+    return list(SECTOR_STOCKS.keys())
+
+
 def get_all_codes() -> list:
-    """전체 종목 코드 리스트"""
     codes = []
     for stocks in SECTOR_STOCKS.values():
         codes.extend(s["code"] for s in stocks)

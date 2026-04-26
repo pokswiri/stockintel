@@ -628,21 +628,28 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
     sector_etfs_live = {}
     sector_indices_live = {}
 
-    if _NEXUS_LOADED and is_kis_available() and sector_names:
+    if _NEXUS_LOADED and is_kis_available():
         try:
-            # 섹터 ETF, 업종지수, NEXUS Score 병렬 실행
+            # AI 실패 여부 판단
+            ai_failed = (ai_engine == "error" or not sector_names)
+
+            # NEXUS + 섹터 ETF/업종지수 병렬 실행
+            # AI 실패 시에도 NEXUS는 전체 섹터 스캔으로 독립 실행
+            nexus_timeout = 90.0 if ai_failed else 60.0  # 전체 스캔 시 더 여유
             nexus_result, sector_etfs_live, sector_indices_live = await asyncio.gather(
-                asyncio.wait_for(run_nexus(sector_names, top_n=3), timeout=60.0),
-                fetch_sector_etfs(sector_names),
-                fetch_sector_indices(sector_names),
+                asyncio.wait_for(
+                    run_nexus(sector_names, top_n=3, ai_failed=ai_failed),
+                    timeout=nexus_timeout,
+                ),
+                fetch_sector_etfs(sector_names) if sector_names else asyncio.sleep(0),
+                fetch_sector_indices(sector_names) if sector_names else asyncio.sleep(0),
                 return_exceptions=True,
             )
-            # 예외 처리
             if isinstance(nexus_result, Exception):
                 nexus_result = {"available": False, "message": str(nexus_result)}
-            if isinstance(sector_etfs_live, Exception):
+            if isinstance(sector_etfs_live, (Exception, type(None))):
                 sector_etfs_live = {}
-            if isinstance(sector_indices_live, Exception):
+            if isinstance(sector_indices_live, (Exception, type(None))):
                 sector_indices_live = {}
         except asyncio.TimeoutError:
             nexus_result = {"available": False, "message": "NEXUS 분석 시간 초과"}
