@@ -38,7 +38,7 @@ SECTOR_STOCKS = {
         {"code": "064350", "name": "현대로템",     "cap": "mid"},    # K2전차·수소
         {"code": "272210", "name": "한화시스템",   "cap": "mid"},    # 레이더·전자전
         {"code": "000880", "name": "한화",         "cap": "large"},  # 방산 지주
-        {"code": "047560", "name": "이스트소프트", "cap": "mid"},    # 방위 SW
+        {"code": "077970", "name": "STX엔진",      "cap": "mid"},    # 선박엔진·AI데이터센터 전력테마
         {"code": "065450", "name": "빅텍",         "cap": "mid"},    # 방산 전자
     ],
     "ai_platform": [
@@ -68,7 +68,7 @@ SECTOR_STOCKS = {
         {"code": "018880", "name": "한온시스템",   "cap": "mid"},
         {"code": "204320", "name": "HL만도",       "cap": "mid"},
         {"code": "011210", "name": "현대위아",     "cap": "mid"},    # 엔진·부품
-        {"code": "007340", "name": "LS전선아시아", "cap": "mid"},
+        {"code": "006260", "name": "LS",           "cap": "mid"},    # LS전선·일렉트릭 지주, 전선·전력기기
         {"code": "009540", "name": "HD현대중공업", "cap": "large"},
     ],
     "renewable": [
@@ -109,7 +109,7 @@ SECTOR_STOCKS = {
         {"code": "009150", "name": "삼성전기",     "cap": "large"},
         {"code": "047050", "name": "포스코인터내셔널","cap": "mid"},
         {"code": "001390", "name": "KG동국제강",   "cap": "mid"},
-        {"code": "010780", "name": "아이에스동서", "cap": "mid"},
+        {"code": "001430", "name": "세아베스틸지주", "cap": "mid"},   # 특수강·봉형강 1위
     ],
 }
 
