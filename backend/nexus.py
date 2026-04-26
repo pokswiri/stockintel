@@ -6,8 +6,10 @@ NEXUS Score 파이프라인
 """
 
 import asyncio
-from kis_client import fetch_charts_parallel, is_pykis_available
-from kis_official import batch_fetch_prices, batch_fetch_investors, is_kis_available
+from kis_official import (
+    batch_fetch_charts, batch_fetch_prices,
+    batch_fetch_investors, is_kis_available
+)
 from technical import calc_nexus_score
 from sector_stocks import get_sector_stocks
 
@@ -15,10 +17,9 @@ from sector_stocks import get_sector_stocks
 async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
     """
     NEXUS Score 전체 파이프라인 실행
-    sector_names: AI가 결정한 섹터 리스트
-    반환: {candidates, top, errors}
+    공식 KIS REST API만 사용 (pykis 의존성 제거)
     """
-    if not is_pykis_available():
+    if not is_kis_available():
         return {
             "available": False,
             "message": "KIS API 키가 설정되지 않았습니다",
@@ -39,8 +40,8 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
     codes = [c["code"] for c in candidates]
     code_to_meta = {c["code"]: c for c in candidates}
 
-    # 2. 일봉 차트 병렬 조회 (pykis)
-    charts = await fetch_charts_parallel(codes)
+    # 2. 일봉 차트 병렬 조회 (공식 KIS REST API - pykis 불필요)
+    charts = await batch_fetch_charts(codes)
 
     # 차트 조회 성공한 코드만 필터
     valid_codes = [code for code in codes if code in charts and "bars" in charts[code]]
@@ -48,7 +49,8 @@ async def run_nexus(sector_names: list, top_n: int = 3) -> dict:
     if not valid_codes:
         return {
             "available": True,
-            "message": "차트 조회 실패",
+            "message": "차트 조회 실패 - KIS 토큰 또는 API 오류",
+            "candidates_tried": len(codes),
             "candidates": [],
             "top": [],
         }

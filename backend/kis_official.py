@@ -251,3 +251,90 @@ async def batch_fetch_investors(codes: list) -> dict:
 
 def is_kis_available() -> bool:
     return bool(KIS_APP_KEY and KIS_APP_SECRET)
+
+
+async def fetch_daily_chart(code: str, days: int = 70) -> dict:
+    """
+    공식 KIS REST API로 일봉 차트 조회 (pykis 불필요)
+    TR_ID: FHKST03010100
+    """
+    token = await get_token()
+    if not token:
+        return {}
+    from datetime import date, timedelta
+    end_dt   = date.today().strftime("%Y%m%d")
+    start_dt = (date.today() - timedelta(days=days)).strftime("%Y%m%d")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                BASE_URL + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+                headers=_headers(token, "FHKST03010100"),
+                params={
+                    "FID_COND_MRKT_DIV_CODE": "J",
+                    "FID_INPUT_ISCD": code,
+                    "FID_INPUT_DATE_1": start_dt,
+                    "FID_INPUT_DATE_2": end_dt,
+                    "FID_PERIOD_DIV_CODE": "D",
+                    "FID_ORG_ADJ_PRC": "1",
+                },
+            )
+            r.raise_for_status()
+            data = r.json()
+            output2 = data.get("output2", [])  # 일별 데이터
+            output1 = data.get("output1", {})  # 종목 기본 정보
+
+            def to_int(v):
+                try: return int(str(v).replace(",", ""))
+                except: return 0
+            def to_float(v):
+                try: return float(str(v).replace(",", ""))
+                except: return 0.0
+
+            bars = []
+            for d in reversed(output2):  # 오름차순 정렬
+                dt = d.get("stck_bsop_date", "")
+                if not dt:
+                    continue
+                bars.append({
+                    "date": dt,
+                    "open":   to_float(d.get("stck_oprc", 0)),
+                    "high":   to_float(d.get("stck_hgpr", 0)),
+                    "low":    to_float(d.get("stck_lwpr", 0)),
+                    "close":  to_float(d.get("stck_clpr", 0)),
+                    "volume": to_int(d.get("acml_vol", 0)),
+                    "amount": to_float(d.get("acml_tr_pbmn", 0)),
+                })
+
+            if not bars:
+                return {}
+
+            return {
+                "code": code,
+                "name": output1.get("hts_kor_isnm", ""),
+                "price": to_float(output1.get("stck_prpr", 0)),
+                "week52_high": to_float(output1.get("stck_dryy_hgpr", 0)),
+                "week52_low":  to_float(output1.get("stck_dryy_lwpr", 0)),
+                "bars": bars,
+                "bars_count": len(bars),
+            }
+    except Exception as e:
+        return {"error": str(e), "code": code}
+
+
+async def batch_fetch_charts(codes: list) -> dict:
+    """여러 종목 일봉 차트 병렬 조회 (공식 KIS REST, pykis 불필요)"""
+    # 최대 5개 동시 (API 한도 준수)
+    semaphore = asyncio.Semaphore(5)
+    async def _fetch(code):
+        async with semaphore:
+            await asyncio.sleep(0.05)
+            return code, await fetch_daily_chart(code)
+    tasks = [_fetch(c) for c in codes]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    out = {}
+    for r in results:
+        if isinstance(r, tuple):
+            code, data = r
+            if isinstance(data, dict) and "bars" in data:
+                out[code] = data
+    return out
