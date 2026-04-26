@@ -131,8 +131,9 @@ async def run_nexus(
             for c in raw
             if c.get("code")
         ]
-    except Exception:
+    except Exception as _api_err:
         api_candidates = []
+        print(f"[NEXUS] fetch_sector_candidates 오류: {_api_err}")
 
     # API 후보 없으면 하드코딩 폴백
     if not api_candidates:
@@ -157,8 +158,19 @@ async def run_nexus(
     ]
 
     if not valid_codes:
-        return {"available": True,
-                "message": "차트 조회 실패", "top": []}
+        # 디버그: 어떤 코드들이 실패했는지 확인
+        chart_errors = {
+            code: charts.get(code, {}).get("error", "응답없음")
+            for code in codes[:5]  # 처음 5개만
+        }
+        return {
+            "available": True,
+            "message": "차트 조회 실패",
+            "debug_codes": codes[:10],
+            "debug_charts_sample": chart_errors,
+            "scan_source": scan_source,
+            "top": [],
+        }
 
     # ── 3. 현재가 + 시총 조회 ────────────────────────────────────────
     price_data = await batch_fetch_prices(valid_codes)
