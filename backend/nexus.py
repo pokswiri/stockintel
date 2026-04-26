@@ -216,16 +216,21 @@ async def run_nexus(
         if mktcap > 0 and mktcap < MKTCAP_MIN:
             continue
 
-        # 시총 미수신(0)인 경우: 주가 500원 미만 초저가 종목 제외
-        # (저가주는 외국인 가집계 노이즈 많음)
-        if mktcap == 0 and price_now < 500:
+        # 시총 미수신(0)인 경우: 주가 1000원 미만 저가주 제외
+        # (저가주는 외국인 가집계 노이즈 많고 투자 부적합)
+        if mktcap == 0 and price_now < 1000:
             continue
 
-        # ── 당일 급등/급락 종목 제외 ────────────────────────
-        # 이미 터진 종목은 "시세 분출 전"이 아님
-        # ±10% 이상 당일 변동 종목 제외 (장 마감 기준)
-        # 단, 장외(주말) 에는 전일 종가 기준이므로 완화
-        chg_now = abs(pd_.get("change_rate", 0))
+        # ── 당일 급등/급락 종목 제외 (bars 기반으로 확실하게) ──
+        # pd_ change_rate는 주말에 0 반환할 수 있으므로 bars 직접 계산
+        chg_bars = 0.0
+        if len(bars) >= 2 and bars[-2]["close"] > 0:
+            chg_bars = (bars[-1]["close"] - bars[-2]["close"]) / bars[-2]["close"] * 100
+        chg_api = pd_.get("change_rate", 0) or 0
+        # 둘 중 더 큰 절댓값 사용 (보수적 적용)
+        chg_now = max(abs(chg_bars), abs(chg_api))
+        # 장외(주말 포함): 15% 이상 → 이미 터진 종목
+        # 장중: 10% 이상 → 이미 터진 종목
         chg_threshold = 15.0 if not market_open else 10.0
         if chg_now >= chg_threshold:
             continue  # 이미 급등/급락 → 진입 타이밍 아님
@@ -321,16 +326,17 @@ UPJONG_TO_SECTOR = {
 # KIS hts_kor_isnm 업종명 키워드 → 섹터 매핑
 NAME_TO_SECTOR = {
     "반도체": "semiconductor", "전자": "semiconductor",
-    "방산": "defense",  "항공": "defense", "조선": "defense",
+    "방산": "defense", "항공": "defense", "조선": "defense", "엔진": "defense",
     "바이오": "healthcare", "제약": "healthcare", "의료": "healthcare",
     "금융": "finance", "은행": "finance", "보험": "finance", "증권": "finance",
     "배터리": "battery", "이차전지": "battery",
     "자동차": "auto_ev", "부품": "auto_ev",
     "태양광": "renewable", "풍력": "renewable", "에너지": "renewable",
+    "전력": "renewable", "전선": "renewable",
     "철강": "steel", "소재": "steel",
     "플랫폼": "ai_platform", "인터넷": "ai_platform", "소프트웨어": "ai_platform",
-    "해운": "auto_ev",  # 해운/물류
-    "전선": "renewable",  # 전력인프라
+    "해운": "steel",   # 해운/물류 → 경기민감주로 steel 섹터 분류
+    "신탁": "finance", "투자": "finance",
     "엔지니어링": "auto_ev",
 }
 
