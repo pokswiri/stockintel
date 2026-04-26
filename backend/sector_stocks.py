@@ -6,34 +6,39 @@ AI가 결정한 섹터 → 후보 종목 매핑
 """
 
 SECTOR_MAP = {
-    # AI 섹터명 키워드 → 내부 섹터 키
+    # AI 섹터명 키워드 → 내부 섹터 키 (소문자 처리 후 매핑)
+    # 한국어
     "반도체": "semiconductor",
-    "semiconductor": "semiconductor",
     "방산": "defense",
-    "defense": "defense",
     "방위": "defense",
-    "ai": "ai_platform",
     "ai플랫폼": "ai_platform",
     "플랫폼": "ai_platform",
     "배터리": "battery",
-    "battery": "battery",
     "이차전지": "battery",
     "자동차": "auto_ev",
-    "ev": "auto_ev",
     "전기차": "auto_ev",
     "신재생": "renewable",
     "재생에너지": "renewable",
     "태양광": "renewable",
     "바이오": "healthcare",
     "헬스케어": "healthcare",
-    "healthcare": "healthcare",
     "제약": "healthcare",
     "금융": "finance",
-    "finance": "finance",
     "은행": "finance",
     "보험": "finance",
     "철강": "steel",
     "소재": "steel",
+    # 영어 소문자
+    "semiconductor": "semiconductor",
+    "defense": "defense",
+    "ai": "ai_platform",
+    "ai_platform": "ai_platform",
+    "battery": "battery",
+    "auto_ev": "auto_ev",
+    "automotive": "auto_ev",
+    "renewable": "renewable",
+    "healthcare": "healthcare",
+    "finance": "finance",
     "steel": "steel",
 }
 
@@ -134,24 +139,39 @@ SECTOR_STOCKS = {
 def get_sector_stocks(sector_names: list, max_per_sector: int = 8) -> list:
     """
     AI가 결정한 섹터명 리스트 → 후보 종목 리스트 반환
-    sector_names: ["반도체", "방산"] 등 한국어 또는 영어 섹터명
+    sector_names: ["반도체", "방산", "SEMICONDUCTOR", "DEFENSE" ...] 한국어/영어 모두 지원
     """
     sector_keys = set()
     for name in sector_names:
+        if not name:
+            continue
         name_lower = name.lower().strip()
-        # 직접 매핑
+        # 1. 직접 매핑 (소문자 변환 후)
         if name_lower in SECTOR_MAP:
             sector_keys.add(SECTOR_MAP[name_lower])
             continue
-        # 부분 매칭
+        # 2. SECTOR_STOCKS 키 직접 매핑 (예: "semiconductor" 자체가 키인 경우)
+        if name_lower in SECTOR_STOCKS:
+            sector_keys.add(name_lower)
+            continue
+        # 3. 부분 매칭
+        matched = False
         for kw, key in SECTOR_MAP.items():
             if kw in name_lower or name_lower in kw:
                 sector_keys.add(key)
+                matched = True
                 break
-        else:
-            # 기본값: semiconductor
-            pass
+        if matched:
+            continue
+        # 4. 언더스코어 제거 후 재시도 (예: "ai_platform" → "aiplatform")
+        name_clean = name_lower.replace("_", "").replace(" ", "")
+        for kw, key in SECTOR_MAP.items():
+            kw_clean = kw.replace("_", "").replace(" ", "")
+            if kw_clean in name_clean or name_clean in kw_clean:
+                sector_keys.add(key)
+                break
 
+    # 매핑 실패 시 기본값
     if not sector_keys:
         sector_keys = {"semiconductor"}
 
