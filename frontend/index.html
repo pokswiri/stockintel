@@ -525,10 +525,15 @@ function render(data){
     lbl.innerHTML = `🔴 NEXUS Score — 시세 분출 후보 <span style="font-size:10px;color:var(--txt3);font-weight:400">${totalScanned}개 스캔 · HIGH ${highCnt} MID ${midCnt}</span>`;
 
     if (nx.top && nx.top.length > 0) {
-      document.getElementById('nx-cards').innerHTML = nx.top.map(s => renderNexusCard(s)).join('');
-      document.getElementById('nx-empty').style.display = 'none';
+      // 각 카드 개별 try-catch로 한 종목 에러가 전체를 막지 않도록
+      const cards = nx.top.map(s => {
+        try { return renderNexusCard(s); }
+        catch(e) { console.error('NEXUS card error:', s.code, e); return ''; }
+      }).join('');
+      document.getElementById('nx-cards').innerHTML = cards;
+      document.getElementById('nx-empty').style.display = cards.trim() ? 'none' : 'block';
       setTimeout(() => {
-        nx.top.forEach(s => drawCandles(s.code, s.nexus.candles));
+        nx.top.forEach(s => { try { drawCandles(s.code, s.nexus.candles); } catch(e){} });
       }, 100);
     } else {
       document.getElementById('nx-cards').innerHTML = '';
@@ -549,14 +554,26 @@ function renderNexusCard(s) {
   const chgCls = s.change_rate > 0 ? 'up' : s.change_rate < 0 ? 'dn' : 'neut';
   const chgSign = s.change_rate > 0 ? '+' : '';
 
+  const safeNum = (v, d=0) => (typeof v === 'number' && isFinite(v)) ? v : d;
   const rows = [
-    {lbl:'VCP',  score:bd.vcp?.score||0,    max:25, detail: bd.vcp?.vcp_contracting ? `조정 ${(bd.vcp.vcp_contracting||[]).map(v=>v.toFixed(0)+'%').join('→')}` : bd.vcp?.vcp_partial ? '패턴 형성중' : '-'},
-    {lbl:'추세',  score:bd.stage2?.score||0,  max:20, detail: bd.stage2?.perfect_alignment ? '완전 정배열' : bd.stage2?.partial_alignment ? '부분 정배열' : '-'},
-    {lbl:'RSI',  score:bd.rsi?.score||0,     max:15, detail: `RSI ${bd.rsi?.rsi||0}`},
-    {lbl:'거래량', score:bd.volume?.score||0,  max:15, detail: bd.volume?.vol_squeeze ? `수축(${bd.volume.vol_ratio_5_20||''})` : bd.volume?.vol_surge ? '급증' : `비율 ${bd.volume?.vol_ratio_5_20||'-'}`},
-    {lbl:'52주',  score:bd.position?.score||0, max:10, detail: bd.position?.week52_position ? `${bd.position.week52_position}%` : '-'},
-    {lbl:'외국인', score:bd.frgn?.score||0,    max:10, detail: bd.frgn?.frgn_5d ? `5일 ${(bd.frgn.frgn_5d/10000).toFixed(0)}만주` : '-'},
-    {lbl:'거래량↑', score:bd.vol_rate?.score||0, max:5, detail: bd.vol_rate?.volume_rate ? `전일비 ${bd.vol_rate.volume_rate}%` : '-'},
+    {lbl:'VCP',   score:safeNum(bd.vcp?.score),    max:25,
+     detail: bd.vcp?.vcp_contracting
+       ? '조정 ' + (bd.vcp.vcp_contracting||[]).map(v=>safeNum(v).toFixed(0)+'%').join('→')
+       : bd.vcp?.vcp_partial ? '패턴 형성중' : '-'},
+    {lbl:'추세',   score:safeNum(bd.stage2?.score),  max:20,
+     detail: bd.stage2?.perfect_alignment ? '완전 정배열' : bd.stage2?.partial_alignment ? '부분 정배열' : '-'},
+    {lbl:'RSI',   score:safeNum(bd.rsi?.score),     max:15,
+     detail: 'RSI ' + safeNum(bd.rsi?.rsi).toFixed(1)},
+    {lbl:'거래량', score:safeNum(bd.volume?.score),  max:15,
+     detail: bd.volume?.vol_recovery ? '수축→회복' : bd.volume?.vol_squeeze ? '수축중' : bd.volume?.vol_surge ? '급증' : '비율 '+(bd.volume?.vol_ratio_5_20||'-')},
+    {lbl:'52주',  score:safeNum(bd.position?.score), max:10,
+     detail: bd.position?.week52_position != null ? safeNum(bd.position.week52_position).toFixed(1)+'%' : '-'},
+    {lbl:'외국인', score:safeNum(bd.frgn?.score),    max:10,
+     detail: bd.frgn?.frgn_5d != null
+       ? (bd.frgn.frgn_5d >= 0 ? '+' : '') + Math.round(bd.frgn.frgn_5d/10000) + '만주'
+       : '-'},
+    {lbl:'거래량↑', score:safeNum(bd.vol_rate?.score), max:5,
+     detail: bd.vol_rate?.volume_rate ? '전일비 '+bd.vol_rate.volume_rate+'%' : bd.vol_rate?.note || '-'},
   ];
 
   const rowsHtml = rows.map(r => `
