@@ -277,19 +277,18 @@ async def run_nexus(
 
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
 
-    # ── 6. HIGH 우선 + MID 보충 ──────────────────────────────────────
+    # ── 6. 점수 상위 top_n개 추천 (등급 무관) ────────────────────────
+    # HIGH 있으면 HIGH 우선, 부족하면 MID, 그래도 부족하면 LOW까지
+    # → 항상 최대 top_n개 반환 보장 (결과 없음 방지)
     high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
     mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
     low_list  = [s for s in scored if s["nexus"]["grade"] == "LOW"]
 
-    final_top = list(high_list[:top_n])
-    if len(final_top) < top_n:
-        top_codes  = {s["code"] for s in final_top}
-        supplement = [s for s in mid_list if s["code"] not in top_codes]
-        final_top += supplement[:(top_n - len(final_top))]
+    # 점수순 정렬된 scored에서 순서대로 top_n개 (이미 정렬됨)
+    final_top = scored[:top_n]
 
     for s in final_top:
-        s["display_grade"] = s["nexus"]["grade"]
+        s["display_grade"] = s["nexus"]["grade"]  # HIGH/MID/LOW 뱃지
 
     wd = datetime.now().weekday()
     scan_mode = ("전체시장·전일기준" if (wd >= 5 and ai_failed)

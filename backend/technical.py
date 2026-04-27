@@ -95,11 +95,11 @@ def calc_vcp_score(bars: list) -> tuple:
     if len(recent) >= 2:
         # 조정폭이 연속으로 줄어드는지 (완전 수축)
         fully_contracting = all(recent[k] > recent[k+1] for k in range(len(recent)-1))
-        if fully_contracting and recent[-1] < recent[0] * 0.7:
-            score += 15
+        if fully_contracting and recent[-1] < recent[0] * 0.8:
+            score += 15      # 완전수축 (0.7→0.8 완화, 20% 수축도 VCP로 인정)
             detail["vcp_contracting"] = [round(c, 1) for c in recent]
         elif recent[-1] < recent[0]:
-            score += 7
+            score += 8       # 부분수축 (7→8)
             detail["vcp_partial"] = True
             detail["corrections"] = [round(c, 1) for c in recent]
 
@@ -139,13 +139,13 @@ def calc_stage2_score(bars: list) -> tuple:
     current = closes[-1]
 
     if current > ma5 > ma20 > ma60 and ma60 > 0:
-        score += 12
+        score += 15          # 완전 정배열 (12→15)
         detail["perfect_alignment"] = True
     elif current > ma20 > ma60 and ma60 > 0:
-        score += 7
+        score += 10          # 부분 정배열 (7→10)
         detail["partial_alignment"] = True
     elif current > ma20:
-        score += 3
+        score += 5           # 최소 요건 (3→5)
 
     detail["ma5"]  = round(ma5, 0)
     detail["ma20"] = round(ma20, 0)
