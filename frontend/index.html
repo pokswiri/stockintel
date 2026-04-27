@@ -316,8 +316,8 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
         <div id="nx-cards"></div>
         <div id="nx-empty" style="display:none" class="card">
           <div style="color:var(--txt3);font-size:13px;padding:4px 0;text-align:center">
-            현재 HIGH/MID 기준을 충족하는 종목이 없습니다.<br>
-            <span style="font-size:11px">장중 재분석 시 수급 데이터가 반영되며 더 많은 후보가 나타날 수 있습니다.</span>
+            현재 스캔 결과가 없습니다.<br>
+            <span style="font-size:11px">장중 재분석 시 실시간 수급 데이터가 반영됩니다.</span>
           </div>
         </div>
       </div>
@@ -536,7 +536,7 @@ function renderNexusCard(s, isWatch=false) {
   const grade = nx.grade;
   const displayGrade = s.display_grade || grade;
   const gradeColor = displayGrade==='HIGH' ? 'var(--red)' : displayGrade==='MID' ? 'var(--amber)' : 'var(--txt3)';
-  const gradeLabel = displayGrade==='HIGH' ? '🔴 HIGH' : displayGrade==='MID' ? '🟡 MID' : 'LOW';
+  const gradeLabel = displayGrade==='HIGH' ? '🔴 HIGH' : displayGrade==='MID' ? '🟡 MID' : '⚪ 주목';
   const chgCls = s.change_rate > 0 ? 'up' : s.change_rate < 0 ? 'dn' : 'neut';
   const chgSign = s.change_rate > 0 ? '+' : '';
 
