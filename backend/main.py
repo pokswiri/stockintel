@@ -639,32 +639,36 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         nexus_result = {"available": False, "message": "KIS API 키 미설정", "top": []}
 
     if _NEXUS_LOADED and is_kis_available():
-        try:
-            # AI 실패 여부 판단
-            ai_failed = (ai_engine == "error" or not sector_names)
+        # AI 실패 여부 판단
+        ai_failed = (ai_engine == "error" or not sector_names)
+        safe_sectors = sector_names if sector_names else []
 
-            # NEXUS + 섹터 ETF/업종지수 병렬 실행
-            # AI 실패 시에도 NEXUS는 전체 섹터 스캔으로 독립 실행
-            nexus_timeout = 120.0 if ai_failed else 60.0  # 전체 스캔(주말 포함) 여유
-            nexus_result, sector_etfs_live, sector_indices_live = await asyncio.gather(
-                asyncio.wait_for(
-                    run_nexus(sector_names, top_n=3, ai_failed=ai_failed),
-                    timeout=nexus_timeout,
-                ),
-                fetch_sector_etfs(sector_names) if sector_names else asyncio.sleep(0),
-                fetch_sector_indices(sector_names) if sector_names else asyncio.sleep(0),
-                return_exceptions=True,
+        # ── NEXUS 독립 실행 (타임아웃 보호) ──────────────────
+        try:
+            nexus_timeout = 90.0  # 고정 90초 (AI 성공/실패 무관)
+            nexus_result = await asyncio.wait_for(
+                run_nexus(safe_sectors, top_n=3, ai_failed=ai_failed),
+                timeout=nexus_timeout,
             )
-            if isinstance(nexus_result, Exception):
-                nexus_result = {"available": False, "message": str(nexus_result)}
-            if isinstance(sector_etfs_live, (Exception, type(None))):
-                sector_etfs_live = {}
-            if isinstance(sector_indices_live, (Exception, type(None))):
-                sector_indices_live = {}
+            if not isinstance(nexus_result, dict):
+                nexus_result = {"available": False, "message": "잘못된 응답 형식", "top": []}
         except asyncio.TimeoutError:
-            nexus_result = {"available": False, "message": "NEXUS 분석 시간 초과"}
+            nexus_result = {"available": False, "message": "NEXUS 분석 시간 초과 (90초)", "top": []}
         except Exception as e:
-            nexus_result = {"available": False, "message": str(e)}
+            nexus_result = {"available": False, "message": f"NEXUS 오류: {str(e)[:80]}", "top": []}
+
+        # ── ETF/업종지수 별도 실행 (NEXUS 실패와 무관하게) ───
+        if safe_sectors:
+            try:
+                sector_etfs_live = await asyncio.wait_for(
+                    fetch_sector_etfs(safe_sectors), timeout=15.0)
+            except Exception:
+                sector_etfs_live = {}
+            try:
+                sector_indices_live = await asyncio.wait_for(
+                    fetch_sector_indices(safe_sectors), timeout=15.0)
+            except Exception:
+                sector_indices_live = {}
 
     return {
         "analyzed_at": datetime.now().isoformat(),

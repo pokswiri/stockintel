@@ -53,8 +53,10 @@ def _is_market_open() -> bool:
 
 def _sector_names_to_keys(sector_names: list) -> list:
     """AI 섹터명 → 내부 키 변환"""
+    if not sector_names:
+        return list(ANCHOR_SECTORS)
     keys = []
-    for name in sector_names:
+    for name in (sector_names or []):
         n = name.lower().strip()
         if n in SECTOR_MAP:
             keys.append(SECTOR_MAP[n])
@@ -143,17 +145,18 @@ async def run_nexus(
         api_candidates = []
         print(f"[NEXUS] fetch_sector_candidates 오류: {_api_err}")
 
-    # API 결과 + sector_stocks 핵심 종목 항상 병합 (일관성 확보)
+    # API 결과 + sector_stocks 핵심 종목 병합 (최대 60개로 제한)
     if not api_candidates:
         api_candidates = _fallback_candidates(sector_keys, ai_failed)
         scan_source = "fallback"
     else:
         scan_source = "realtime"
-        # sector_stocks 핵심 종목을 API 결과에 항상 추가
-        # → API 응답 변동에도 검증된 대장주 커버 보장
+        # sector_stocks 핵심 종목 추가 (API에 없는 것만, 최대 60개 제한)
         fallback = _fallback_candidates(sector_keys, ai_failed)
         existing_codes = {c["code"] for c in api_candidates}
         for s in fallback:
+            if len(api_candidates) >= 60:  # 최대 60개 제한 (속도 보장)
+                break
             if s["code"] not in existing_codes:
                 api_candidates.append(s)
                 existing_codes.add(s["code"])
