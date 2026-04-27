@@ -629,9 +629,14 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
             pass
 
     # 5. NEXUS Score + 섹터 ETF/업종지수 실시간 (KIS API)
-    nexus_result = None
+    nexus_result = {"available": False, "message": "초기화 전", "top": []}
     sector_etfs_live = {}
     sector_indices_live = {}
+
+    if not _NEXUS_LOADED:
+        nexus_result = {"available": False, "message": "nexus 모듈 로드 실패", "top": []}
+    elif not is_kis_available():
+        nexus_result = {"available": False, "message": "KIS API 키 미설정", "top": []}
 
     if _NEXUS_LOADED and is_kis_available():
         try:

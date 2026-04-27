@@ -24,12 +24,20 @@ NEXUS Score 파이프라인 — 실시간 수급 기반 후보 선정
 import asyncio
 from datetime import datetime
 from kis_official import (
-    fetch_sector_candidates, fetch_all_market_candidates,
     batch_fetch_charts, batch_fetch_prices,
     batch_fetch_investors, is_kis_available,
 )
 from technical import calc_nexus_score
 from sector_stocks import get_sector_stocks, SECTOR_STOCKS, SECTOR_MAP
+
+# fetch_sector_candidates는 최신 kis_official에만 있음 — 안전하게 임포트
+try:
+    from kis_official import fetch_sector_candidates, fetch_all_market_candidates
+    _HAS_REALTIME_SCAN = True
+except ImportError:
+    _HAS_REALTIME_SCAN = False
+    async def fetch_sector_candidates(sector_keys, top_n=30): return []
+    async def fetch_all_market_candidates(top_n=40): return []
 
 ANCHOR_SECTORS = ["semiconductor", "finance"]
 MKTCAP_MIN = 500  # 억원, 시총 필터
