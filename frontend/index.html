@@ -494,22 +494,33 @@ function render(data){
       </div>
     </div>` : '';
 
-  // NEXUS 섹션 렌더링
+  // NEXUS 섹션 렌더링 — null/available:false 포함 항상 표시
   document.getElementById('nx-section').style.display = 'block';
 
-  if (nx && nx.available) {
+  if (!nx) {
+    // nexus가 null이면 (모듈 로드 실패 등)
+    document.getElementById('nx-label').textContent = '🔴 NEXUS Score — 시세 분출 후보';
+    document.getElementById('nx-cards').innerHTML = '';
+    document.getElementById('nx-empty').style.display = 'block';
+    document.getElementById('nx-empty').querySelector('div').innerHTML =
+      'NEXUS 분석을 준비 중입니다.<br><span style="font-size:11px">서버 재시작 후 다시 시도해 주세요.</span>';
+  } else if (!nx.available) {
+    // available:false → 에러 메시지 표시
+    document.getElementById('nx-label').textContent = '🔴 NEXUS Score — 시세 분출 후보';
+    document.getElementById('nx-cards').innerHTML = '';
+    document.getElementById('nx-empty').style.display = 'block';
+    document.getElementById('nx-empty').querySelector('div').innerHTML =
+      (nx.message || 'NEXUS 분석 오류') + '<br><span style="font-size:11px">잠시 후 다시 시도해 주세요.</span>';
+  } else {
     const gc = nx.grade_counts || {};
     const totalScanned = nx.scored_count || 0;
     const highCnt = gc.HIGH || 0;
     const midCnt  = gc.MID  || 0;
 
-    // 라벨 업데이트
     const lbl = document.getElementById('nx-label');
-    const anchors = (nx.anchor_sectors || []).join('·');
     lbl.innerHTML = `🔴 NEXUS Score — 시세 분출 후보 <span style="font-size:10px;color:var(--txt3);font-weight:400">${totalScanned}개 스캔 · HIGH ${highCnt} MID ${midCnt}</span>`;
 
     if (nx.top && nx.top.length > 0) {
-      // 각 카드 개별 try-catch로 한 종목 에러가 전체를 막지 않도록
       const cards = nx.top.map(s => {
         try { return renderNexusCard(s); }
         catch(e) { console.error('NEXUS card error:', s.code, e); return ''; }
@@ -523,8 +534,6 @@ function render(data){
       document.getElementById('nx-cards').innerHTML = '';
       document.getElementById('nx-empty').style.display = 'block';
     }
-  } else {
-    document.getElementById('nx-section').style.display = 'none';
   }
 
   showDash();
