@@ -78,12 +78,12 @@ def _sector_names_to_keys(sector_names: list, max_sectors: int = 3) -> list:
 
 
 def _fallback_candidates(sector_keys: list, ai_failed: bool,
-                         max_per_sector: int = 30) -> list:
+                         max_per_sector: int = 15) -> list:
     """
     sector_stocks.py 기반 후보 목록
     - KIS API 실패 시 폴백 (주 역할)
     - AI 성공 시 API 결과 보완 (보조 역할)
-    섹터당 최대 max_per_sector개 (기본 30개)
+    섹터당 최대 max_per_sector개 (기본값 30→15로 수정: 실제 호출 시 15 사용하므로 일치)
     """
     seen = set()
     result = []
@@ -224,15 +224,17 @@ async def run_nexus(
         inv        = investor_data.get(code, {})
 
         # 가집계에서 받은 수급 정보를 investor_data에 보완
+        # is_estimated=True: 당일 1회 가집계 수치로 5일 데이터를 추정한 것임을 표시
         if not inv and meta.get("frgn_qty", 0) > 0:
             inv = {
-                "frgn_5d":             meta["frgn_qty"],
-                "frgn_20d":            meta["frgn_qty"],
-                "inst_5d":             meta.get("inst_qty", 0),
-                "inst_20d":            meta.get("inst_qty", 0),
-                "frgn_consec_days":    1,
+                "frgn_5d":              meta["frgn_qty"],
+                "frgn_20d":             meta["frgn_qty"],
+                "inst_5d":              meta.get("inst_qty", 0),
+                "inst_20d":             meta.get("inst_qty", 0),
+                "frgn_consec_days":     1,
                 "frgn_positive_days_5": 1,
-                "latest_date":         "",
+                "latest_date":          "",
+                "is_estimated":         True,   # 가집계 추정치 플래그
             }
 
         # ── 시총 필터 ──────────────────────────────────────

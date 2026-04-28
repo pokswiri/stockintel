@@ -512,15 +512,16 @@ async def fetch_sector_etfs(sector_keys: list) -> dict:
 
 # 섹터 → KIS 업종코드 매핑
 SECTOR_TO_UPJONG = {
-    "semiconductor": ["0011"],          # 전기전자
-    "defense":       ["0021"],          # 운수장비
-    "healthcare":    ["0027"],          # 의약품
-    "finance":       ["0024"],          # 금융업
-    "battery":       ["0011"],          # 전기전자 (배터리 포함)
+    "semiconductor": ["0011"],          # 전기전자 (반도체 포함)
+    "defense":       ["0021", "0017"],  # 운수장비 + 기계 (방산 분산)
+    "healthcare":    ["0027", "0028"],  # 의약품 + 의료정밀
+    "finance":       ["0024", "0023"],  # 금융업 + 증권
+    "battery":       ["0010"],          # 화학 (배터리소재 중심, 전기전자와 분리)
     "auto_ev":       ["0021"],          # 운수장비
     "renewable":     ["0007", "0014"],  # 철강금속 + 비금속 (신재생 분산)
-    "ai_platform":   ["0011"],          # 전기전자
+    "ai_platform":   ["0011"],          # 전기전자 (IT플랫폼)
     "steel":         ["0007"],          # 철강금속
+    "shipbuilding":  ["0021", "0009"],  # 운수장비 + 운수창고 (조선·해운)
     # 전체 시장 (섹터 미결정 시)
     "all_kospi":     ["0001"],          # 코스피 전체
     "all_kosdaq":    ["1001"],          # 코스닥 전체

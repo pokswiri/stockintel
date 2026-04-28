@@ -32,10 +32,11 @@ def calc_rsi(closes: list, period: int = 14) -> float:
     return round(100.0 - (100.0 / (1.0 + avg_gain / avg_loss)), 2)
 
 
-def _find_swings(closes: list, window: int = 3):
+def _find_swings(closes: list, window: int = 5):
     """
     시간 순서 보장 스윙 고점/저점 탐지
     반환: [(idx, price, type)] type='peak'|'trough' 시간순
+    window=5: ±5일 기준으로 단기 노이즈 스윙 필터링 (기존 3→5)
     """
     swings = []
     n = len(closes)
@@ -86,11 +87,10 @@ def calc_vcp_score(bars: list) -> tuple:
         else:
             i += 1
 
-    # 최근 3개 조정 구간만 사용
-    recent = corrections[-3:] if len(corrections) >= 3 else corrections
-
-    # 유효한 조정 구간만 (양수, 2% 이상 조정만 의미있음)
-    recent = [c for c in corrections[-3:] if c >= 2.0] if corrections else []
+    # 최근 3개 조정 구간 추출 후 2% 미만 노이즈 제거
+    # (버그수정: 기존 두번째 줄이 corrections[-3:]를 재참조해 첫 줄 할당이 무시됨)
+    recent_raw = corrections[-3:] if corrections else []
+    recent = [c for c in recent_raw if c >= 2.0]
 
     if len(recent) >= 2:
         # 조정폭이 연속으로 줄어드는지 (완전 수축)
@@ -158,11 +158,7 @@ def calc_stage2_score(bars: list) -> tuple:
             score += 5
             detail["ma60_rising"] = True
 
-    # 52주 고가 75% 이상 (bars 기반 추정 - 실제값은 position_score에서)
-    w52_high = max(closes)
-    if w52_high > 0 and current >= w52_high * 0.75:
-        score += 3
-        detail["near_52w"] = True
+    # 52주 위치 보너스 제거 — position_score(0~10점)에서 이미 반영하므로 이중 계산 방지
 
     return min(score, 20), detail
 
@@ -196,10 +192,11 @@ def calc_rsi_score(bars: list) -> tuple:
     return score, detail
 
 
-def calc_volume_score(bars: list) -> tuple:
+def calc_volume_score(bars: list, is_market_open: bool = True) -> tuple:
     """
     거래량 수축·회복 패턴 점수 (0~15)
     VCP와 중복 피해 수축 후 회복(돌파 시작)에 집중
+    is_market_open: 장중이면 당일봉 미완성이므로 vol_surge는 volumes[-2] 기준
     """
     if len(bars) < 20:
         return 0, {}
@@ -225,12 +222,22 @@ def calc_volume_score(bars: list) -> tuple:
             score += 8
             detail["vol_squeeze"] = True
 
-        # 직전일 거래량 급증 (돌파 시작 신호)
+        # 직전 확정봉 거래량 급증 (돌파 시작 신호)
+        # 장중: 당일봉 미완성 → volumes[-2](전일 최종) 기준
+        # 장마감: volumes[-1](어제 최종) 기준
         if len(volumes) >= 6:
-            avg_prev5 = _sma(volumes[-6:-1], 5)
-            if avg_prev5 > 0 and volumes[-1] >= avg_prev5 * 1.5:
+            if is_market_open:
+                # 장중: 전일봉[-2] vs 그 이전 5일[-7:-2] 비교
+                ref_vol  = volumes[-2] if len(volumes) >= 2 else 0
+                avg_base = _sma(volumes[-7:-2], min(5, len(volumes)-2)) if len(volumes) >= 7 else 0
+            else:
+                # 장마감: 최신봉[-1] vs 직전 5일[-6:-1] 비교
+                ref_vol  = volumes[-1]
+                avg_base = _sma(volumes[-6:-1], 5) if len(volumes) >= 6 else 0
+            if avg_base > 0 and ref_vol >= avg_base * 1.5:
                 score += 5
                 detail["vol_surge"] = True
+                detail["vol_surge_basis"] = "prev_day" if is_market_open else "latest"
 
     return min(score, 15), detail
 
@@ -270,7 +277,8 @@ def calc_position_score(bars: list, week52_high: float = 0, week52_low: float = 
 def calc_frgn_score(investor_data: dict) -> tuple:
     """
     외국인 순매수 점수 (0~10)
-    음수(매도) 정상 처리 버전
+    - frgn_5d(5일 합계)가 음수이면 positive_days 점수를 절반으로 제한
+      (3일 많이 사고 2일 크게 판 경우 수급 방향성 불일치 방지)
     """
     if not investor_data:
         return 0, {}
@@ -282,22 +290,31 @@ def calc_frgn_score(investor_data: dict) -> tuple:
     frgn_5d       = investor_data.get("frgn_5d", 0)
     inst_5d       = investor_data.get("inst_5d", 0)
 
-    detail["frgn_5d"]         = frgn_5d
-    detail["frgn_consec_days"]= consec
-    detail["inst_5d"]         = inst_5d
-    detail["positive_days"]   = positive_days
+    detail["frgn_5d"]          = frgn_5d
+    detail["frgn_consec_days"] = consec
+    detail["inst_5d"]          = inst_5d
+    detail["positive_days"]    = positive_days
 
-    # 5일 중 순매수 일수 기준 (음수 버그 수정 후 실제 값)
+    # 5일 중 순매수 일수 기준
     if positive_days == 5:
-        score += 8
+        base = 8
     elif positive_days == 4:
-        score += 6
+        base = 6
     elif positive_days == 3:
-        score += 4
+        base = 4
     elif positive_days >= 1:
-        score += 2
+        base = 2
+    else:
+        base = 0
 
-    # 외국인+기관 동시 매수 보너스
+    # frgn_5d 합계가 음수 → 일수 점수 절반 (매수일이 있어도 전체 방향이 매도)
+    if frgn_5d < 0 and base > 0:
+        base = base // 2
+        detail["frgn_net_negative"] = True
+
+    score += base
+
+    # 외국인+기관 동시 매수 보너스 (합계 모두 양수인 경우만)
     if frgn_5d > 0 and inst_5d > 0:
         score += 2
         detail["dual_buy"] = True
@@ -344,7 +361,7 @@ def calc_nexus_score(
     vcp_s,    vcp_d    = calc_vcp_score(bars)
     stage2_s, stage2_d = calc_stage2_score(bars)
     rsi_s,    rsi_d    = calc_rsi_score(bars)
-    vol_s,    vol_d    = calc_volume_score(bars)
+    vol_s,    vol_d    = calc_volume_score(bars, is_market_open)
     pos_s,    pos_d    = calc_position_score(bars, w52h, w52l)
     frgn_s,   frgn_d   = calc_frgn_score(investor_data)
     vrate_s,  vrate_d  = calc_vol_rate_score(price_data, is_market_open)

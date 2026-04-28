@@ -354,7 +354,7 @@ def build_prompt(news_items: list, hours: int) -> str:
     news_text = build_news_text(news_items)
     count = len(news_items)
 
-    # Sector-based stock reference: name:code:isin:cap(large/mid)
+    # Sector-based stock reference: name:code:cap(large/mid)
     kr_ref = (
         "SEMICONDUCTOR:Samsung Electronics:005930:large,SK Hynix:000660:large,Hanmi Semiconductor:042700:mid|"
         "DEFENSE:Hanwha Aerospace:012450:large,LIG Nex1:079550:mid,Korea Aerospace:047810:large|"
@@ -364,12 +364,25 @@ def build_prompt(news_items: list, hours: int) -> str:
         "RENEWABLE:Hanwha Solutions:009830:large|"
         "FINANCE:KB Financial:105560:large,Shinhan Financial:055550:large|"
         "HEALTHCARE:Celltrion:068270:large,Samsung Biologics:207940:large|"
-        "STEEL:POSCO Holdings:005490:large"
+        "STEEL:POSCO Holdings:005490:large|"
+        "SHIPBUILDING:HD Hyundai Heavy:009540:large,Hanwha Ocean:042660:large,Samsung Heavy:010140:large"
+    )
+
+    # 섹터 키 목록 (kr_market.sectors[].name 필드에 반드시 아래 값 중 하나를 사용)
+    sector_key_list = (
+        "semiconductor | defense | ai_platform | battery | auto_ev | "
+        "renewable | finance | healthcare | steel | shipbuilding"
     )
 
     prompt = (
         "You are a Korean stock market analyst. Analyze the news below and return ONLY a JSON object. No explanation, no markdown, no code blocks.\n\n"
         "CRITICAL: All text fields marked (Korean) MUST be written in Korean (한국어). DO NOT use empty strings or spaces for Korean fields.\n\n"
+        "SECTOR NAME RULE: In kr_market.sectors[].name, you MUST use EXACTLY one of these keys:\n"
+        f"  {sector_key_list}\n"
+        "  Example: if news is about semiconductors → name: \"semiconductor\"\n"
+        "           if news is about shipbuilding/해운/조선 → name: \"shipbuilding\"\n"
+        "           if news is about biotech/pharma → name: \"healthcare\"\n"
+        "  DO NOT use free-form text like '반도체', 'IT하드웨어', '2차전지' — use the exact key above.\n\n"
         "Required JSON structure:\n"
         "{\n"
         "  \"summary\": {\n"
@@ -381,7 +394,7 @@ def build_prompt(news_items: list, hours: int) -> str:
         "  \"key_issues\": [ 3-4 items: {category(person_statement|economic_indicator|geopolitics|commodity|corporate|market), person_or_event(Korean), title(Korean), detail(Korean 2 sentences from actual news), impact(positive|negative|neutral), affected_sectors[2], news_url} ],\n"
         "  \"top_news\": [ 5 items: {title(Korean), url, source, lang:\"ko\", impact, category, summary(Korean 2 sentences)} ],\n"
         "  \"us_market\": { outlook(Korean 2 sentences), sectors[2-3]{name,name_ko(Korean),etf,strength(1-5),signal,news_trigger(Korean),reason(Korean)}, stocks[2]{ticker,name,sector,signal,news_trigger(Korean),reason(Korean),risk} },\n"
-        "  \"kr_market\": { outlook(Korean 2 sentences), sectors[2-3]{name,strength(1-5),signal,news_trigger(Korean),reason(Korean),key_stocks[2 codes]}, stocks[2]{code(6digits),isin,name(Korean),sector,signal,news_trigger(Korean),reason(Korean),risk,target_price} },\n"
+        "  \"kr_market\": { outlook(Korean 2 sentences), sectors[2-3]{name(MUST use sector key from list above),strength(1-5),signal,news_trigger(Korean),reason(Korean),key_stocks[2 codes]}, stocks[2]{code(6digits),isin,name(Korean),sector,signal,news_trigger(Korean),reason(Korean),risk,target_price} },\n"
         "  \"risks\": [ 2-3 items: {title(Korean), detail(Korean 2 sentences), severity:high|medium|low, related_sectors[1-2]} ]\n"
         "}\n\n"
         "STRICT RULE: Korean stocks MUST be directly mentioned or clearly implied by the news above. Do NOT pick stocks without news evidence. stocks[0]=large cap of most news-relevant sector, stocks[1]=different sector if possible. Available: "
@@ -424,36 +437,75 @@ async def analyze_gemini(prompt: str) -> dict:
     raise RuntimeError("Gemini: rate limit after retry")
 
 
-async def analyze_groq(prompt: str) -> dict:
+def build_groq_prompt(news_items: list, hours: int) -> str:
+    """
+    Groq(llama) 전용 경량 프롬프트
+    - 전체 JSON 구조 대신 핵심 필드만 요청 (토큰 절감, 400/413 방지)
+    - 섹터 키 형식 동일하게 강제
+    """
+    news_text = build_news_text(news_items[:10])  # 최대 10개로 제한
+    sector_key_list = "semiconductor|defense|ai_platform|battery|auto_ev|renewable|finance|healthcare|steel|shipbuilding"
+
+    return (
+        "Korean stock analyst. Analyze news, return ONLY JSON. No markdown.\n\n"
+        "SECTOR KEYS (use exactly): " + sector_key_list + "\n\n"
+        "JSON structure:\n"
+        "{\n"
+        "  \"summary\": {\"headline\":\"(Korean 20chars)\",\"sentiment\":\"bullish|bearish|neutral\",\"score\":-100~100,\"market_overview\":\"(Korean 2 sentences)\"},\n"
+        "  \"key_issues\": [{\"title\":\"(Korean)\",\"detail\":\"(Korean)\",\"impact\":\"positive|negative|neutral\",\"affected_sectors\":[\"sector_key\"]}],\n"
+        "  \"top_news\": [{\"title\":\"(Korean)\",\"url\":\"\",\"source\":\"\",\"lang\":\"ko\",\"impact\":\"positive\",\"category\":\"\",\"summary\":\"(Korean)\"}],\n"
+        "  \"us_market\": {\"outlook\":\"(Korean)\",\"sectors\":[],\"stocks\":[]},\n"
+        "  \"kr_market\": {\n"
+        "    \"outlook\":\"(Korean 2 sentences)\",\n"
+        "    \"sectors\":[{\"name\":\"EXACT_SECTOR_KEY\",\"strength\":1-5,\"signal\":\"buy|hold|sell\",\"news_trigger\":\"(Korean)\",\"reason\":\"(Korean)\",\"key_stocks\":[\"code\"]}],\n"
+        "    \"stocks\":[{\"code\":\"6digits\",\"isin\":\"\",\"name\":\"(Korean)\",\"sector\":\"EXACT_SECTOR_KEY\",\"signal\":\"buy\",\"news_trigger\":\"(Korean)\",\"reason\":\"(Korean)\",\"risk\":\"(Korean)\",\"target_price\":0}]\n"
+        "  },\n"
+        "  \"risks\": [{\"title\":\"(Korean)\",\"detail\":\"(Korean)\",\"severity\":\"high|medium|low\",\"related_sectors\":[]}]\n"
+        "}\n\n"
+        "NEWS (last " + str(hours) + "h):\n" + news_text + "\nJSON:"
+    )
+
+
+async def analyze_groq(prompt: str, news_items: list = None, hours: int = 24) -> dict:
+    """
+    Groq 폴백 분석
+    - 먼저 경량 프롬프트로 시도 (400/413 방지)
+    - 경량도 실패 시 원본 프롬프트로 재시도
+    """
     # 모델 우선순위: 70b → 8b (400/413 에러 시 자동 폴백)
     models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
     last_err = ""
+
+    # Groq 전용 경량 프롬프트 우선 사용
+    groq_prompt = build_groq_prompt(news_items, hours) if news_items else prompt
+
     for model in models:
-        body = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
-            "max_tokens": 3000,
-        }
-        for attempt in range(2):
-            async with httpx.AsyncClient(timeout=60) as client:
-                r = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": "Bearer " + GROQ_KEY,
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
-                if r.status_code == 429 and attempt == 0:
-                    await asyncio.sleep(15)
-                    continue
-                if r.status_code in (400, 413):
-                    last_err = f"Groq {model}: {r.status_code}"
-                    break  # 다음 모델 시도
-                r.raise_for_status()
-                text = r.json()["choices"][0]["message"]["content"]
-                return parse_json(text)
+        for use_prompt in [groq_prompt, prompt] if groq_prompt != prompt else [prompt]:
+            body = {
+                "model": model,
+                "messages": [{"role": "user", "content": use_prompt}],
+                "temperature": 0.3,
+                "max_tokens": 2000,
+            }
+            for attempt in range(2):
+                async with httpx.AsyncClient(timeout=60) as client:
+                    r = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={
+                            "Authorization": "Bearer " + GROQ_KEY,
+                            "Content-Type": "application/json",
+                        },
+                        json=body,
+                    )
+                    if r.status_code == 429 and attempt == 0:
+                        await asyncio.sleep(15)
+                        continue
+                    if r.status_code in (400, 413):
+                        last_err = f"Groq {model}: {r.status_code}"
+                        break  # 다음 프롬프트/모델 시도
+                    r.raise_for_status()
+                    text = r.json()["choices"][0]["message"]["content"]
+                    return parse_json(text)
     raise RuntimeError("Groq: all models failed. " + last_err)
 
 
@@ -496,7 +548,7 @@ async def run_analysis(news: list, hours: int):
 
     if GROQ_KEY:
         try:
-            return await analyze_groq(prompt), "groq"
+            return await analyze_groq(prompt, news_items=news, hours=hours), "groq"
         except Exception as ex:
             errors.append("Groq: " + str(ex))
 
