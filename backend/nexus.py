@@ -88,9 +88,9 @@ def _fallback_candidates(sector_keys: list, ai_failed: bool,
     seen = set()
     result = []
     if ai_failed:
-        # AI 실패: 전체 섹터 상위 8개씩 (속도 균형)
+        # AI 실패: 전체 섹터 상위 5개씩 (속도 균형)
         for sk, stocks in SECTOR_STOCKS.items():
-            for s in stocks[:8]:
+            for s in stocks[:5]:
                 if s["code"] not in seen:
                     seen.add(s["code"])
                     result.append({**s, "sector_key": sk,
@@ -160,10 +160,10 @@ async def run_nexus(
         scan_source = "realtime"
         # sector_stocks 30개를 API 결과에 보완 (최대 90개 제한)
         # → API: 실시간 수급 종목 / sector_stocks: 섹터 대표 종목
-        fallback = _fallback_candidates(sector_keys, ai_failed, max_per_sector=30)
+        fallback = _fallback_candidates(sector_keys, ai_failed, max_per_sector=15)
         existing_codes = {c["code"] for c in api_candidates}
         for s in fallback:
-            if len(api_candidates) >= 90:  # 최대 90개 (3섹터 × 30개)
+            if len(api_candidates) >= 50:  # 최대 50개 (속도 보장)
                 break
             if s["code"] not in existing_codes:
                 api_candidates.append(s)

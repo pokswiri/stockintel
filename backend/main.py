@@ -610,25 +610,7 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
     kr_sectors = analysis.get("kr_market", {}).get("sectors", [])
     sector_names = [s.get("name", "") for s in kr_sectors if s.get("name")]
 
-    # 4. AI 추천 종목 주가 KIS API로 직접 조회
-    kr_stocks = analysis.get("kr_market", {}).get("stocks", [])
-    if is_kis_available() and kr_stocks:
-        try:
-            from kis_official import batch_fetch_prices as _bfp
-            ai_codes = [s.get("code","") for s in kr_stocks if s.get("code","")]
-            ai_prices = await _bfp(ai_codes)
-            for s in kr_stocks:
-                code = s.get("code", "")
-                if code and code in ai_prices:
-                    pd = ai_prices[code]
-                    s["price_data"] = {
-                        "close":   pd.get("price", 0),
-                        "chg_pct": pd.get("change_rate", 0),
-                    }
-        except Exception:
-            pass
-
-    # 5. NEXUS Score + 섹터 ETF/업종지수 실시간 (KIS API)
+    # 4+5. AI 종목 주가 조회 + NEXUS + ETF/지수 병렬 실행
     nexus_result = {"available": False, "message": "초기화 전", "top": []}
     sector_etfs_live = {}
     sector_indices_live = {}
@@ -639,36 +621,58 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         nexus_result = {"available": False, "message": "KIS API 키 미설정", "top": []}
 
     if _NEXUS_LOADED and is_kis_available():
-        # AI 실패 여부 판단
-        ai_failed = (ai_engine == "error" or not sector_names)
+        ai_failed   = (ai_engine == "error" or not sector_names)
         safe_sectors = sector_names if sector_names else []
 
-        # ── NEXUS 독립 실행 (타임아웃 보호) ──────────────────
+        # AI 종목 주가 조회 coroutine
+        async def _fetch_ai_stock_prices():
+            kr_stocks = analysis.get("kr_market", {}).get("stocks", [])
+            if not kr_stocks: return
+            try:
+                from kis_official import batch_fetch_prices as _bfp
+                ai_codes = [s.get("code","") for s in kr_stocks if s.get("code","")]
+                ai_prices = await _bfp(ai_codes)
+                for s in kr_stocks:
+                    code = s.get("code", "")
+                    if code and code in ai_prices:
+                        pd = ai_prices[code]
+                        s["price_data"] = {"close": pd.get("price", 0),
+                                           "chg_pct": pd.get("change_rate", 0)}
+            except Exception:
+                pass
+
+        async def _fetch_etfs():
+            if not safe_sectors: return {}
+            try:
+                return await asyncio.wait_for(
+                    fetch_sector_etfs(safe_sectors), timeout=10.0)
+            except Exception: return {}
+
+        async def _fetch_indices():
+            if not safe_sectors: return {}
+            try:
+                return await asyncio.wait_for(
+                    fetch_sector_indices(safe_sectors), timeout=10.0)
+            except Exception: return {}
+
+        # NEXUS + AI주가 + ETF + 지수 동시 실행
         try:
-            nexus_timeout = 90.0  # 고정 90초 (AI 성공/실패 무관)
-            nexus_result = await asyncio.wait_for(
-                run_nexus(safe_sectors, top_n=3, ai_failed=ai_failed),
-                timeout=nexus_timeout,
+            results = await asyncio.gather(
+                asyncio.wait_for(
+                    run_nexus(safe_sectors, top_n=3, ai_failed=ai_failed),
+                    timeout=80.0,
+                ),
+                _fetch_ai_stock_prices(),
+                _fetch_etfs(),
+                _fetch_indices(),
+                return_exceptions=True,
             )
-            if not isinstance(nexus_result, dict):
-                nexus_result = {"available": False, "message": "잘못된 응답 형식", "top": []}
-        except asyncio.TimeoutError:
-            nexus_result = {"available": False, "message": "NEXUS 분석 시간 초과 (90초)", "top": []}
+            nx, _, etf_r, idx_r = results
+            nexus_result      = nx if isinstance(nx, dict) else {"available": False, "message": str(nx)[:80], "top": []}
+            sector_etfs_live  = etf_r if isinstance(etf_r, dict) else {}
+            sector_indices_live = idx_r if isinstance(idx_r, dict) else {}
         except Exception as e:
             nexus_result = {"available": False, "message": f"NEXUS 오류: {str(e)[:80]}", "top": []}
-
-        # ── ETF/업종지수 별도 실행 (NEXUS 실패와 무관하게) ───
-        if safe_sectors:
-            try:
-                sector_etfs_live = await asyncio.wait_for(
-                    fetch_sector_etfs(safe_sectors), timeout=15.0)
-            except Exception:
-                sector_etfs_live = {}
-            try:
-                sector_indices_live = await asyncio.wait_for(
-                    fetch_sector_indices(safe_sectors), timeout=15.0)
-            except Exception:
-                sector_indices_live = {}
 
     return {
         "analyzed_at": datetime.now().isoformat(),
