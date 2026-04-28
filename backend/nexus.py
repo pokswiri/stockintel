@@ -39,7 +39,7 @@ except ImportError:
     async def fetch_sector_candidates(sector_keys, top_n=30): return []
     async def fetch_all_market_candidates(top_n=40): return []
 
-ANCHOR_SECTORS = ["semiconductor", "finance"]
+ANCHOR_SECTORS = ["semiconductor"]  # finance 제거 — 뉴스 기반 섹터로 충분
 MKTCAP_MIN = 500  # 억원, 시총 필터
 
 
@@ -51,8 +51,8 @@ def _is_market_open() -> bool:
     return (9*60 <= t <= 15*60+30) or (16*60 <= t <= 20*60)
 
 
-def _sector_names_to_keys(sector_names: list) -> list:
-    """AI 섹터명 → 내부 키 변환"""
+def _sector_names_to_keys(sector_names: list, max_sectors: int = 3) -> list:
+    """AI 섹터명 → 내부 키 변환 (최대 max_sectors개)"""
     if not sector_names:
         return list(ANCHOR_SECTORS)
     keys = []
@@ -67,31 +67,38 @@ def _sector_names_to_keys(sector_names: list) -> list:
                 if kw in n or n in kw:
                     keys.append(key)
                     break
-    # 중복 제거 + ANCHOR 항상 포함
-    result = list(dict.fromkeys(keys))  # 순서 유지 중복 제거
+    # 중복 제거
+    result = list(dict.fromkeys(keys))
+    # ANCHOR 포함 (이미 있으면 추가 안 함)
     for a in ANCHOR_SECTORS:
         if a not in result:
             result.append(a)
-    return result
+    # 최대 3개로 제한 (과도한 스캔 방지)
+    return result[:max_sectors]
 
 
-def _fallback_candidates(sector_keys: list, ai_failed: bool) -> list:
+def _fallback_candidates(sector_keys: list, ai_failed: bool,
+                         max_per_sector: int = 30) -> list:
     """
-    KIS API 실패 시 sector_stocks.py 하드코딩 목록으로 폴백
+    sector_stocks.py 기반 후보 목록
+    - KIS API 실패 시 폴백 (주 역할)
+    - AI 성공 시 API 결과 보완 (보조 역할)
+    섹터당 최대 max_per_sector개 (기본 30개)
     """
     seen = set()
     result = []
     if ai_failed:
-        # AI 실패: 전체 섹터 상위 5개씩
+        # AI 실패: 전체 섹터 상위 8개씩 (속도 균형)
         for sk, stocks in SECTOR_STOCKS.items():
-            for s in stocks[:5]:
+            for s in stocks[:8]:
                 if s["code"] not in seen:
                     seen.add(s["code"])
                     result.append({**s, "sector_key": sk,
                                    "source": "fallback_full"})
     else:
+        # AI 성공: 해당 섹터 전체 30개
         for sk in sector_keys:
-            for s in SECTOR_STOCKS.get(sk, []):
+            for s in SECTOR_STOCKS.get(sk, [])[:max_per_sector]:
                 if s["code"] not in seen:
                     seen.add(s["code"])
                     result.append({**s, "sector_key": sk,
@@ -151,11 +158,12 @@ async def run_nexus(
         scan_source = "fallback"
     else:
         scan_source = "realtime"
-        # sector_stocks 핵심 종목 추가 (API에 없는 것만, 최대 60개 제한)
-        fallback = _fallback_candidates(sector_keys, ai_failed)
+        # sector_stocks 30개를 API 결과에 보완 (최대 90개 제한)
+        # → API: 실시간 수급 종목 / sector_stocks: 섹터 대표 종목
+        fallback = _fallback_candidates(sector_keys, ai_failed, max_per_sector=30)
         existing_codes = {c["code"] for c in api_candidates}
         for s in fallback:
-            if len(api_candidates) >= 60:  # 최대 60개 제한 (속도 보장)
+            if len(api_candidates) >= 90:  # 최대 90개 (3섹터 × 30개)
                 break
             if s["code"] not in existing_codes:
                 api_candidates.append(s)
@@ -288,15 +296,36 @@ async def run_nexus(
 
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
 
-    # ── 6. 점수 상위 top_n개 추천 (등급 무관) ────────────────────────
-    # HIGH 있으면 HIGH 우선, 부족하면 MID, 그래도 부족하면 LOW까지
-    # → 항상 최대 top_n개 반환 보장 (결과 없음 방지)
+    # ── 6. 섹터 다양성 보장 + 점수순 top_n개 ────────────────────────
+    # 원칙: 같은 섹터에서 1개만 선택 (동일 섹터 독점 방지)
+    # 순서: 점수 높은 것부터, 해당 섹터 첫 번째만 선택
+    # 보완: top_n 미달 시 이미 선택한 섹터에서 추가로 채움
     high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
     mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
     low_list  = [s for s in scored if s["nexus"]["grade"] == "LOW"]
 
-    # 점수순 정렬된 scored에서 순서대로 top_n개 (이미 정렬됨)
-    final_top = scored[:top_n]
+    # 1단계: 섹터별 1개씩 (점수순)
+    seen_sectors = set()
+    diverse_top  = []
+    for s in scored:
+        sk = s.get("sector_key", "") or "기타"
+        if sk not in seen_sectors:
+            seen_sectors.add(sk)
+            diverse_top.append(s)
+        if len(diverse_top) >= top_n:
+            break
+
+    # 2단계: top_n 미달이면 이미 선택된 섹터에서 점수순으로 보완
+    if len(diverse_top) < top_n:
+        selected_codes = {s["code"] for s in diverse_top}
+        for s in scored:
+            if s["code"] not in selected_codes:
+                diverse_top.append(s)
+                selected_codes.add(s["code"])
+            if len(diverse_top) >= top_n:
+                break
+
+    final_top = diverse_top[:top_n]
 
     for s in final_top:
         s["display_grade"] = s["nexus"]["grade"]  # HIGH/MID/LOW 뱃지
