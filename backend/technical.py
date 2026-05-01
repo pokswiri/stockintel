@@ -417,7 +417,7 @@ def calc_nexus_score(
         "total": total,
         "grade": grade,
         "breakdown": {
-            "vcp":     {"score": vcp_s,    "max": 25, **vcp_d},
+            "vcp":     {"score": vcp_s,    "max": 30, **vcp_d},
             "stage2":  {"score": stage2_s, "max": 20, **stage2_d},
             "rsi":     {"score": rsi_s,    "max": 15, **rsi_d},
             "volume":  {"score": vol_s,    "max": 15, **vol_d},

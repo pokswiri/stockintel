@@ -100,7 +100,6 @@ def update_returns(price_fetcher_fn):
         if rec_price <= 0:
             continue
 
-        # 업데이트할 구간 결정
         targets = {}
         if delta >= 1  and "d1"  not in rec["returns"]: targets["d1"]  = 1
         if delta >= 3  and "d3"  not in rec["returns"]: targets["d3"]  = 3
@@ -124,6 +123,72 @@ def update_returns(price_fetcher_fn):
     if updated > 0:
         _save(data)
         print(f"[TRACKER] {updated}개 수익률 업데이트")
+
+
+async def update_returns_async(batch_price_fn):
+    """
+    비동기 수익률 업데이트 — /analyze 호출 시 자동 실행
+    batch_price_fn: [codes] → {code: {price: ...}} (KIS batch_fetch_prices)
+
+    주말/공휴일엔 전일 종가가 그대로 유지되므로 거래일 기준 delta 계산
+    """
+    data    = _load()
+    today   = datetime.now().date()
+    weekday = today.weekday()
+
+    # 업데이트 대상 선별 (수익률이 아직 채워지지 않은 구간이 있는 것만)
+    targets_by_code: dict = {}
+    for rec in data["records"]:
+        try:
+            rec_date  = datetime.fromisoformat(rec["rec_date"]).date()
+            delta     = (today - rec_date).days
+            rec_price = rec.get("rec_price", 0)
+        except Exception:
+            continue
+        if rec_price <= 0 or delta <= 0:
+            continue
+
+        # 주말엔 가격 조회 불가 → 스킵
+        if weekday >= 5:
+            continue
+
+        needed = []
+        if delta >= 1  and "d1"  not in rec["returns"]: needed.append("d1")
+        if delta >= 3  and "d3"  not in rec["returns"]: needed.append("d3")
+        if delta >= 5  and "d5"  not in rec["returns"]: needed.append("d5")
+        if delta >= 10 and "d10" not in rec["returns"]: needed.append("d10")
+
+        if needed:
+            targets_by_code[rec["code"]] = {
+                "rec": rec,
+                "needed": needed,
+                "rec_price": rec_price,
+            }
+
+    if not targets_by_code:
+        return
+
+    # 현재가 일괄 조회
+    try:
+        prices = await batch_price_fn(list(targets_by_code.keys()))
+    except Exception as e:
+        print(f"[TRACKER] 가격 조회 실패: {e}")
+        return
+
+    updated = 0
+    for code, info in targets_by_code.items():
+        cur_price = prices.get(code, {}).get("price", 0)
+        if not cur_price or cur_price <= 0:
+            continue
+        ret_pct = round((cur_price - info["rec_price"]) / info["rec_price"] * 100, 2)
+        for key in info["needed"]:
+            info["rec"]["returns"][key] = ret_pct
+        info["rec"]["updated_at"] = datetime.now().isoformat()
+        updated += 1
+
+    if updated > 0:
+        _save(data)
+        print(f"[TRACKER] {updated}개 수익률 자동 업데이트 완료")
 
 
 def get_performance_stats() -> dict:

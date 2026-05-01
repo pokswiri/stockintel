@@ -115,18 +115,23 @@ async def run_nexus(
     sector_names: list,
     top_n: int = 3,
     ai_failed: bool = False,
+    sector_strength: dict = None,   # {"semiconductor": 5, "defense": 3} 형태
 ) -> dict:
     """
     NEXUS Score 파이프라인
-    sector_names : AI 선정 섹터명 리스트
-    ai_failed    : True → 전체 시장 스캔
+    sector_names    : AI 선정 섹터명 리스트
+    ai_failed       : True → 전체 시장 스캔
+    sector_strength : AI 섹터별 강도(1~5) → 해당 섹터 종목 점수 가산
     """
     if not is_kis_available():
+        print("[NEXUS] KIS API 키 미설정 — 종료")
         return {"available": False,
                 "message": "KIS API 키가 설정되지 않았습니다", "top": []}
 
-    market_open  = _is_market_open()
-    sector_keys  = _sector_names_to_keys(sector_names)
+    market_open     = _is_market_open()
+    sector_keys     = _sector_names_to_keys(sector_names)
+    sector_strength = sector_strength or {}
+    print(f"[NEXUS] 시작 | sector_keys={sector_keys} | strength={sector_strength} | market_open={market_open}")
 
     # ── 1. 후보 종목 실시간 수신 (KIS foreign_institution_total) ──────
     api_candidates = []
@@ -175,10 +180,12 @@ async def run_nexus(
                 existing_codes.add(s["code"])
 
     if not api_candidates:
+        print("[NEXUS] 후보 종목 없음 — 종료")
         return {"available": True, "message": "후보 종목 없음", "top": []}
 
     codes = list(dict.fromkeys(c["code"] for c in api_candidates))
     code_to_meta = {c["code"]: c for c in api_candidates}
+    print(f"[NEXUS] 후보 {len(codes)}개 확보 (source={scan_source})")
 
     # ── 2. 일봉 차트 병렬 조회 ────────────────────────────────────────
     charts = await batch_fetch_charts(codes)
@@ -188,16 +195,17 @@ async def run_nexus(
         and "bars" in charts[c]
         and len(charts[c]["bars"]) >= 20
     ]
+    print(f"[NEXUS] 차트 조회 완료 | 유효={len(valid_codes)}/{len(codes)}개")
 
     if not valid_codes:
-        # 디버그: 어떤 코드들이 실패했는지 확인
         chart_errors = {
             code: charts.get(code, {}).get("error", "응답없음")
-            for code in codes[:5]  # 처음 5개만
+            for code in codes[:5]
         }
+        print(f"[NEXUS] 차트 조회 전체 실패 | 샘플={chart_errors}")
         return {
-            "available": True,
-            "message": "차트 조회 실패",
+            "available": False,
+            "message": f"차트 조회 실패 ({len(codes)}개 시도)",
             "debug_codes": codes[:10],
             "debug_charts_sample": chart_errors,
             "scan_source": scan_source,
@@ -304,13 +312,37 @@ async def run_nexus(
             if is_small_cap:
                 nexus["total"] = max(0, nexus["total"] - 5)
                 nexus["small_cap_penalty"] = True
-                # 페널티 후 등급 재계산
                 if nexus["total"] >= 65:
                     nexus["grade"] = "HIGH"
                 elif nexus["total"] >= 50:
                     nexus["grade"] = "MID"
                 else:
                     nexus["grade"] = "LOW"
+
+            # ── 섹터 모멘텀 가중치 ──────────────────────────────────
+            # AI가 선정한 섹터의 strength(1~5)에 비례해 점수 가산
+            # strength 5 → +5점 / 4 → +3점 / 3 → +1점 / 1~2 → 0점
+            # 뉴스 모멘텀이 강한 섹터 종목을 우선 추천하는 효과
+            sk = sector_key or meta.get("sector_key", "")
+            if sk and sector_strength:
+                st = sector_strength.get(sk, 0)
+                if st >= 5:
+                    momentum_bonus = 5
+                elif st == 4:
+                    momentum_bonus = 3
+                elif st == 3:
+                    momentum_bonus = 1
+                else:
+                    momentum_bonus = 0
+                if momentum_bonus > 0:
+                    nexus["total"] = nexus["total"] + momentum_bonus
+                    nexus["sector_momentum_bonus"] = momentum_bonus
+                    nexus["sector_strength"] = st
+                    # 보너스 후 등급 재계산
+                    if nexus["total"] >= 65:
+                        nexus["grade"] = "HIGH"
+                    elif nexus["total"] >= 50:
+                        nexus["grade"] = "MID"
 
             price = pd_.get("price") or (bars[-1]["close"] if bars else 0)
             chg   = (pd_.get("change_rate")
@@ -343,6 +375,7 @@ async def run_nexus(
             errors.append({"code": code, "error": str(e)})
 
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
+    print(f"[NEXUS] 스코어링 완료 | scored={len(scored)} | HIGH={len([s for s in scored if s['nexus']['grade']=='HIGH'])} MID={len([s for s in scored if s['nexus']['grade']=='MID'])} errors={len(errors)}")
 
     # ── 6. 섹터 다양성 보장 + 점수순 top_n개 ────────────────────────
     # 원칙: 같은 섹터에서 1개만 선택 (동일 섹터 독점 방지)
@@ -421,7 +454,9 @@ UPJONG_TO_SECTOR = {
 # KIS hts_kor_isnm 업종명 키워드 → 섹터 매핑
 NAME_TO_SECTOR = {
     "반도체": "semiconductor", "전자": "semiconductor",
-    "방산": "defense", "항공": "defense", "조선": "defense", "엔진": "defense",
+    "방산": "defense", "항공": "defense", "엔진": "defense",
+    "조선": "shipbuilding", "해양": "shipbuilding", "중공업": "shipbuilding",  # shipbuilding으로 수정
+    "해운": "shipbuilding",   # 해운도 shipbuilding으로 통합
     "바이오": "healthcare", "제약": "healthcare", "의료": "healthcare",
     "금융": "finance", "은행": "finance", "보험": "finance", "증권": "finance",
     "배터리": "battery", "이차전지": "battery",
@@ -430,7 +465,6 @@ NAME_TO_SECTOR = {
     "전력": "renewable", "전선": "renewable",
     "철강": "steel", "소재": "steel",
     "플랫폼": "ai_platform", "인터넷": "ai_platform", "소프트웨어": "ai_platform",
-    "해운": "steel",   # 해운/물류 → 경기민감주로 steel 섹터 분류
     "신탁": "finance", "투자": "finance",
     "엔지니어링": "auto_ev",
 }

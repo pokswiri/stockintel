@@ -11,12 +11,13 @@ from fastapi.responses import JSONResponse
 
 # 성과 추적 모듈
 try:
-    from tracker import save_recommendations, get_performance_stats
+    from tracker import save_recommendations, get_performance_stats, update_returns_async
     _TRACKER_LOADED = True
 except Exception:
     _TRACKER_LOADED = False
     def save_recommendations(*a, **kw): pass
     def get_performance_stats(): return {"total_count": 0, "records": [], "stats": {}}
+    async def update_returns_async(*a, **kw): pass
 
 # KIS NEXUS Score 모듈 (키가 없으면 graceful 비활성화)
 try:
@@ -621,8 +622,42 @@ def _get_bet_timing() -> dict:
         return {"label": "전 장 마감", "msg": "정규장·야간장 모두 마감됐습니다. 내일 전략을 준비하세요.", "highlight": False, "session": "closed"}
 
 
+# ── 분석 결과 캐시 (메모리, 30분) ────────────────────────────────
+# Railway 재시작 시 초기화되지만 운영 중 API 한도 절감 효과 큼
+_CACHE: dict = {}
+_CACHE_TTL = 30 * 60  # 30분 (초)
+
+
+def _cache_get(key: str):
+    """캐시 조회 — 만료 시 None 반환"""
+    if key not in _CACHE:
+        return None
+    data, saved_at = _CACHE[key]
+    if (datetime.now() - saved_at).total_seconds() > _CACHE_TTL:
+        del _CACHE[key]
+        return None
+    return data
+
+
+def _cache_set(key: str, data):
+    """캐시 저장"""
+    _CACHE[key] = (data, datetime.now())
+
+
 @app.get("/analyze")
-async def analyze(hours: int = Query(default=24, ge=1, le=168)):
+async def analyze(
+    hours: int = Query(default=24, ge=1, le=168),
+    force: bool = Query(default=False, description="캐시 무시하고 강제 재분석"),
+):
+    # 캐시 확인 (force=true이면 무시)
+    cache_key = f"analyze_{hours}"
+    if not force:
+        cached = _cache_get(cache_key)
+        if cached:
+            print(f"[CACHE] HIT — hours={hours} (30분 캐시)")
+            return {**cached, "cached": True}
+
+    print(f"[ANALYZE] 시작 — hours={hours} force={force}")
     # 1. 뉴스 수집
     google_news, naver_news = await asyncio.gather(
         fetch_google_news(hours),
@@ -670,8 +705,15 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
     krx_etfs    = {}
 
     # 3. AI 추천 섹터 추출 (NEXUS 입력용)
-    kr_sectors = analysis.get("kr_market", {}).get("sectors", [])
+    kr_sectors   = analysis.get("kr_market", {}).get("sectors", [])
     sector_names = [s.get("name", "") for s in kr_sectors if s.get("name")]
+
+    # AI 섹터 강도(strength 1~5) 추출 → NEXUS 모멘텀 가중치에 활용
+    sector_strength = {
+        s.get("name", ""): int(s.get("strength", 3))
+        for s in kr_sectors
+        if s.get("name") and s.get("strength")
+    }
 
     # 4+5. AI 종목 주가 조회 + NEXUS + ETF/지수 병렬 실행
     nexus_result = {"available": False, "message": "초기화 전", "top": []}
@@ -722,7 +764,12 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         try:
             results = await asyncio.gather(
                 asyncio.wait_for(
-                    run_nexus(safe_sectors, top_n=3, ai_failed=ai_failed),
+                    run_nexus(
+                        safe_sectors,
+                        top_n=3,
+                        ai_failed=ai_failed,
+                        sector_strength=sector_strength,
+                    ),
                     timeout=80.0,
                 ),
                 _fetch_ai_stock_prices(),
@@ -739,14 +786,19 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
 
     analyzed_at = datetime.now().isoformat()
 
-    # NEXUS 추천 종목 성과 추적 저장
-    if _TRACKER_LOADED and nexus_result.get("available") and nexus_result.get("top"):
+    # NEXUS 추천 종목 성과 추적 저장 + 기존 추천 수익률 자동 업데이트
+    if _TRACKER_LOADED:
         try:
-            save_recommendations(nexus_result["top"], analyzed_at)
+            if nexus_result.get("available") and nexus_result.get("top"):
+                save_recommendations(nexus_result["top"], analyzed_at)
+            # 기존 추천 종목 수익률 업데이트 (백그라운드, 실패해도 무시)
+            if is_kis_available():
+                from kis_official import batch_fetch_prices as _bfp
+                await update_returns_async(_bfp)
         except Exception as e:
-            print(f"[TRACKER] 저장 오류: {e}")
+            print(f"[TRACKER] 오류: {e}")
 
-    return {
+    result = {
         "analyzed_at": analyzed_at,
         "hours": hours,
         "ai_engine": ai_engine,
@@ -764,7 +816,15 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         "sector_indices_live": sector_indices_live,
         "bet_timing": _get_bet_timing(),
         "kis_available": is_kis_available(),
+        "cached": False,
     }
+
+    # 캐시 저장 (NEXUS 성공 시에만 캐싱 — 실패 결과는 캐싱 안 함)
+    if nexus_result.get("available") or ai_engine != "error":
+        _cache_set(cache_key, result)
+        print(f"[CACHE] STORED — hours={hours}")
+
+    return result
 
 
 @app.get("/performance")
