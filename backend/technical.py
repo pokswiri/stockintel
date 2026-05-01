@@ -52,8 +52,10 @@ def _find_swings(closes: list, window: int = 5):
 
 def calc_vcp_score(bars: list) -> tuple:
     """
-    VCP (Volatility Contraction Pattern) 점수 (0~25)
+    VCP (Volatility Contraction Pattern) 점수 (0~30)
     핵심: 시간 순서대로 고점→저점 구간 조정폭이 점점 줄어드는지
+    + 돌파 캔들 거래량 폭증 감지 (수축 종료 후 첫 강한 양봉)
+    최대 점수 25→30으로 상향 (돌파 거래량 보너스 +5)
     """
     if len(bars) < 25:
         return 0, {}
@@ -64,7 +66,7 @@ def calc_vcp_score(bars: list) -> tuple:
     detail = {}
 
     # 스윙 포인트 시간 순으로 추출
-    swings = _find_swings(closes, window=3)
+    swings = _find_swings(closes, window=5)
 
     # 연속 고점→저점 구간(조정 구간)을 시간순으로 추출
     corrections = []
@@ -88,22 +90,20 @@ def calc_vcp_score(bars: list) -> tuple:
             i += 1
 
     # 최근 3개 조정 구간 추출 후 2% 미만 노이즈 제거
-    # (버그수정: 기존 두번째 줄이 corrections[-3:]를 재참조해 첫 줄 할당이 무시됨)
     recent_raw = corrections[-3:] if corrections else []
     recent = [c for c in recent_raw if c >= 2.0]
 
     if len(recent) >= 2:
-        # 조정폭이 연속으로 줄어드는지 (완전 수축)
         fully_contracting = all(recent[k] > recent[k+1] for k in range(len(recent)-1))
         if fully_contracting and recent[-1] < recent[0] * 0.8:
-            score += 15      # 완전수축 (0.7→0.8 완화, 20% 수축도 VCP로 인정)
+            score += 15
             detail["vcp_contracting"] = [round(c, 1) for c in recent]
         elif recent[-1] < recent[0]:
-            score += 8       # 부분수축 (7→8)
+            score += 8
             detail["vcp_partial"] = True
             detail["corrections"] = [round(c, 1) for c in recent]
 
-    # 거래량 수축 (VCP 핵심 요소 - 별도 volume 점수와 중복 피하기 위해 경량화)
+    # 거래량 수축 (VCP 핵심 요소)
     if len(volumes) >= 20:
         vol_20avg = _sma(volumes, 20)
         vol_5avg  = _sma(volumes, 5)
@@ -121,7 +121,32 @@ def calc_vcp_score(bars: list) -> tuple:
             score += 5
             detail["above_ma20"] = True
 
-    return min(score, 25), detail
+    # ── 돌파 캔들 거래량 폭증 감지 (+5보너스) ──────────────────────
+    # 수축 구간 종료 후 최근 3일 내 강한 양봉 + 거래량 폭증 = 진짜 돌파 시그널
+    # 조건: 최근 3일 중 하루라도 종가>시가(양봉) AND 해당일 거래량 > 20일평균 * 2.0
+    if len(bars) >= 20 and score >= 5:  # above_ma20 이상이면 체크
+        vol_20avg_b = _sma(volumes, 20)
+        breakout_found = False
+        for i in range(-3, 0):  # 최근 3봉 체크
+            if abs(i) > len(bars):
+                continue
+            b = bars[i]
+            is_bullish  = b["close"] > b["open"]                        # 양봉
+            vol_surge   = b["volume"] > vol_20avg_b * 2.0              # 거래량 2배
+            price_surge = (b["close"] - b["open"]) / b["open"] * 100 > 1.5  # 봉 크기 1.5% 이상
+            if is_bullish and vol_surge and price_surge:
+                breakout_found = True
+                detail["breakout_candle"] = {
+                    "idx": i,
+                    "vol_ratio": round(b["volume"] / vol_20avg_b, 1) if vol_20avg_b else 0,
+                    "body_pct":  round((b["close"] - b["open"]) / b["open"] * 100, 1),
+                }
+                break
+        if breakout_found:
+            score += 5
+            detail["breakout_vol"] = True
+
+    return min(score, 30), detail
 
 
 def calc_stage2_score(bars: list) -> tuple:

@@ -9,6 +9,15 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+# 성과 추적 모듈
+try:
+    from tracker import save_recommendations, get_performance_stats
+    _TRACKER_LOADED = True
+except Exception:
+    _TRACKER_LOADED = False
+    def save_recommendations(*a, **kw): pass
+    def get_performance_stats(): return {"total_count": 0, "records": [], "stats": {}}
+
 # KIS NEXUS Score 모듈 (키가 없으면 graceful 비활성화)
 try:
     from nexus import run_nexus
@@ -58,26 +67,28 @@ KEYWORDS_EN = [
     '"Trump" tariff OR trade 2026',
     '"Jerome Powell" Fed rate statement',
     '"Jensen Huang" Nvidia AI chip',
-    '"Elon Musk" Tesla xAI',
     '"FOMC" interest rate decision',
     '"CPI" OR "inflation" data 2026',
-    '"nonfarm payrolls" OR "jobs report"',
     '"semiconductor" export ban AI',
-    '"earnings" S&P 500 results',
     '"AI" data center investment spending',
+    '"LNG" OR "shipbuilding" order contract',
+    '"biotech" OR "FDA" approval clinical trial',
+    '"K-pop" OR "webtoon" OR "K-content" global',
 ]
 
 KEYWORDS_KO = [
-    "코스피 코스닥 주식 시장",          # 시장 전반
-    "트럼프 관세 무역 한국",             # 지정학
-    "연준 파월 금리 FOMC",              # 통화정책
-    "삼성전자 SK하이닉스 반도체 실적",   # 반도체
-    "외국인 기관 순매수 순매도",         # 수급
-    "방산 한화에어로 현대로템 수주",      # 방산
-    "바이오 제약 임상 FDA 승인",         # 헬스케어
-    "현대차 기아 자동차 실적 판매",      # 자동차 (실적 정확히 반영)
-    "이차전지 배터리 양극재",           # 배터리
-    "환율 원달러 외환",                 # 환율
+    "코스피 코스닥 주식 시장",             # 시장 전반
+    "트럼프 관세 무역 한국",               # 지정학
+    "삼성전자 SK하이닉스 반도체 실적",     # 반도체
+    "외국인 기관 순매수 순매도",           # 수급
+    "방산 한화에어로 현대로템 수주",        # 방산
+    "바이오 제약 임상 FDA 승인",           # 헬스케어
+    "현대차 기아 자동차 전기차 실적",       # 자동차
+    "이차전지 배터리 양극재 LFP",          # 배터리
+    "조선 LNG선 수주 HD현대 한화오션",     # 조선 (신규)
+    "엔터 K팝 콘텐츠 드라마 흥행",         # 엔터 (신규)
+    "게임 신작 출시 넥슨 크래프톤",         # 게임 (신규)
+    "환율 원달러 외환",                    # 환율
 ]
 
 KR_STOCKS = [
@@ -726,8 +737,17 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         except Exception as e:
             nexus_result = {"available": False, "message": f"NEXUS 오류: {str(e)[:80]}", "top": []}
 
+    analyzed_at = datetime.now().isoformat()
+
+    # NEXUS 추천 종목 성과 추적 저장
+    if _TRACKER_LOADED and nexus_result.get("available") and nexus_result.get("top"):
+        try:
+            save_recommendations(nexus_result["top"], analyzed_at)
+        except Exception as e:
+            print(f"[TRACKER] 저장 오류: {e}")
+
     return {
-        "analyzed_at": datetime.now().isoformat(),
+        "analyzed_at": analyzed_at,
         "hours": hours,
         "ai_engine": ai_engine,
         "news_count": {
@@ -745,6 +765,22 @@ async def analyze(hours: int = Query(default=24, ge=1, le=168)):
         "bet_timing": _get_bet_timing(),
         "kis_available": is_kis_available(),
     }
+
+
+@app.get("/performance")
+def performance():
+    """
+    NEXUS 추천 성과 조회
+    - 등급별(HIGH/MID/LOW) 평균 수익률 및 승률
+    - 섹터별 성과 통계
+    - 최근 30개 추천 이력
+    """
+    if not _TRACKER_LOADED:
+        return JSONResponse({"error": "tracker 모듈 비활성화"}, status_code=503)
+    try:
+        return get_performance_stats()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/health")
@@ -765,4 +801,4 @@ def health():
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "StockIntel", "version": "4.0"}
+    return {"status": "ok", "service": "StockIntel", "version": "4.1"}

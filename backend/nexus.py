@@ -40,7 +40,12 @@ except ImportError:
     async def fetch_all_market_candidates(top_n=40): return []
 
 ANCHOR_SECTORS = ["semiconductor"]  # finance 제거 — 뉴스 기반 섹터로 충분
-MKTCAP_MIN = 500  # 억원, 시총 필터
+
+# ── 잡주 필터 기준 ──────────────────────────────────────────────
+MKTCAP_MIN       = 2000   # 억원: 500→2000 (문배철강급 잡주 제거)
+MKTCAP_MID_WARN  = 5000   # 억원: 2000~5000은 허용하되 점수 페널티(-5점)
+PRICE_MIN        = 2000   # 원: 1000→2000 (동전주 추가 제거)
+AVG_VOL_MIN      = 50000  # 주: 20일 평균거래량 5만주 미만 → 유동성 부족 제거
 
 
 def _is_market_open() -> bool:
@@ -237,36 +242,75 @@ async def run_nexus(
                 "is_estimated":         True,   # 가집계 추정치 플래그
             }
 
-        # ── 시총 필터 ──────────────────────────────────────
-        mktcap = pd_.get("mktcap", 0)
+        # ── 잡주 필터 ────────────────────────────────────────────
+        mktcap    = pd_.get("mktcap", 0)
         price_now = pd_.get("price", 0) or (bars[-1]["close"] if bars else 0)
 
-        # 시총이 확인된 경우: MKTCAP_MIN(500억) 미만 제외
+        # 1) 시총 2000억 미만 제거 (확인된 경우만)
         if mktcap > 0 and mktcap < MKTCAP_MIN:
             continue
 
-        # 시총 미수신(0)인 경우: 주가 1000원 미만 저가주 제외
-        # (저가주는 외국인 가집계 노이즈 많고 투자 부적합)
-        if mktcap == 0 and price_now < 1000:
+        # 2) 주가 2000원 미만 동전주 제거
+        if price_now > 0 and price_now < PRICE_MIN:
             continue
 
-        # ── 당일 급등/급락 종목 제외 (bars 기반으로 확실하게) ──
-        # pd_ change_rate는 주말에 0 반환할 수 있으므로 bars 직접 계산
+        # 3) 20일 평균거래량 5만주 미만 → 유동성 부족 제거
+        if len(bars) >= 20:
+            avg_vol_20 = sum(b["volume"] for b in bars[-20:]) / 20
+            if avg_vol_20 < AVG_VOL_MIN:
+                continue
+        elif bars:
+            avg_vol_20 = sum(b["volume"] for b in bars) / len(bars)
+            if avg_vol_20 < AVG_VOL_MIN:
+                continue
+        else:
+            avg_vol_20 = 0
+
+        # 시총 2000~5000억 구간: 통과하되 페널티 플래그 세팅
+        is_small_cap = (0 < mktcap < MKTCAP_MID_WARN)
+
+        # ── 급등/급락 필터 (RSI + 등락률 조합으로 개선) ─────────────
         chg_bars = 0.0
         if len(bars) >= 2 and bars[-2]["close"] > 0:
             chg_bars = (bars[-1]["close"] - bars[-2]["close"]) / bars[-2]["close"] * 100
         chg_api = pd_.get("change_rate", 0) or 0
-        # 둘 중 더 큰 절댓값 사용 (보수적 적용)
         chg_now = max(abs(chg_bars), abs(chg_api))
-        # 장외(주말 포함): 15% 이상 → 이미 터진 종목
-        # 장중: 10% 이상 → 이미 터진 종목
-        chg_threshold = 15.0 if not market_open else 10.0
-        if chg_now >= chg_threshold:
-            continue  # 이미 급등/급락 → 진입 타이밍 아님
+
+        # 과열 판단: 단순 등락률이 아닌 RSI + 등락률 조합
+        # - RSI 80 이상 + 등락률 8% 이상 → 과열 (양방향)
+        # - 등락률 20% 이상 → 무조건 제외 (상한가/하한가 근접)
+        # - 등락률 15% 이상 + RSI 75 이상 → 과열 제외
+        # - 등락률 15% 이내 + RSI 75 미만 → 돌파 진입 허용
+        closes_list = [b["close"] for b in bars]
+        rsi_now = 50.0
+        try:
+            from technical import calc_rsi
+            rsi_now = calc_rsi(closes_list)
+        except Exception:
+            pass
+
+        if chg_now >= 20.0:
+            continue  # 상한가/하한가 근접 → 무조건 제외
+        if chg_now >= 15.0 and rsi_now >= 75.0:
+            continue  # 급등 + 과열 RSI → 제외
+        if chg_now >= 8.0 and rsi_now >= 80.0:
+            continue  # 중간 급등 + 극과열 → 제외
 
         try:
             nexus = calc_nexus_score(
                 bars, charts[code], inv, pd_, market_open)
+
+            # 시총 2000~5000억 소형주 페널티 -5점
+            if is_small_cap:
+                nexus["total"] = max(0, nexus["total"] - 5)
+                nexus["small_cap_penalty"] = True
+                # 페널티 후 등급 재계산
+                if nexus["total"] >= 65:
+                    nexus["grade"] = "HIGH"
+                elif nexus["total"] >= 50:
+                    nexus["grade"] = "MID"
+                else:
+                    nexus["grade"] = "LOW"
 
             price = pd_.get("price") or (bars[-1]["close"] if bars else 0)
             chg   = (pd_.get("change_rate")
@@ -288,6 +332,8 @@ async def run_nexus(
                 "price":        round(price),
                 "change_rate":  round(chg, 2),
                 "mktcap":       mktcap,
+                "avg_vol_20":   round(avg_vol_20),
+                "is_small_cap": is_small_cap,
                 "frgn_today":   meta.get("frgn_qty", 0),
                 "inst_today":   meta.get("inst_qty", 0),
                 "nexus":        nexus,
