@@ -15,6 +15,162 @@ def _sma(values: list, n: int) -> float:
     return sum(values[-n:]) / n
 
 
+def _bars_to_weekly(bars: list) -> list:
+    """
+    일봉 → 주봉 변환 (월~금 기준 5일 묶음)
+    KIS API의 날짜(stck_bsop_date) 기준으로 주차 구분
+    bars는 시간순 정렬(오래된 것 먼저) 가정
+    """
+    if not bars:
+        return []
+
+    weekly = []
+    week_bars = []
+
+    for bar in bars:
+        dt_str = bar.get("date", "")
+        try:
+            from datetime import datetime as _dt
+            dt = _dt.strptime(dt_str, "%Y%m%d")
+            week_num = dt.isocalendar()[1]  # ISO 주차
+            year_num = dt.isocalendar()[0]
+            key = (year_num, week_num)
+        except Exception:
+            continue
+
+        if not week_bars:
+            week_bars = [(key, bar)]
+        elif week_bars[-1][0] == key:
+            week_bars.append((key, bar))
+        else:
+            # 주차 변경 → 이전 주 마감
+            wk = [b for _, b in week_bars]
+            weekly.append({
+                "date":   wk[0]["date"],
+                "open":   wk[0]["open"],
+                "high":   max(b["high"]   for b in wk),
+                "low":    min(b["low"]    for b in wk),
+                "close":  wk[-1]["close"],
+                "volume": sum(b["volume"] for b in wk),
+            })
+            week_bars = [(key, bar)]
+
+    # 마지막 주 처리
+    if week_bars:
+        wk = [b for _, b in week_bars]
+        weekly.append({
+            "date":   wk[0]["date"],
+            "open":   wk[0]["open"],
+            "high":   max(b["high"]   for b in wk),
+            "low":    min(b["low"]    for b in wk),
+            "close":  wk[-1]["close"],
+            "volume": sum(b["volume"] for b in wk),
+        })
+
+    return weekly
+
+
+def calc_weekly_vcp_bonus(bars: list) -> tuple:
+    """
+    주봉 VCP 병행 검증 — 일봉 VCP 신뢰도 강화용 보너스 점수
+    반환: (bonus_score, detail)
+    bonus_score: 0 / 3 / 5
+      - 0: 주봉 조건 미충족 (일봉 VCP 점수 그대로)
+      - 3: 주봉 부분 정배열 + 수축 확인 (신뢰도 보통)
+      - 5: 주봉 완전 정배열 + VCP 수축 + MA10주 우상향 (신뢰도 높음)
+
+    주봉 데이터가 20개(약 5개월) 미만이면 0점 반환
+    """
+    weekly = _bars_to_weekly(bars)
+    if len(weekly) < 20:
+        return 0, {"weekly_bars": len(weekly), "skip": "주봉 데이터 부족"}
+
+    w_closes  = [w["close"]  for w in weekly]
+    w_volumes = [w["volume"] for w in weekly]
+    detail    = {"weekly_bars": len(weekly)}
+    bonus     = 0
+
+    # 1) 주봉 이동평균 정배열 확인
+    w_ma5  = _sma(w_closes, 5)
+    w_ma10 = _sma(w_closes, 10)
+    w_ma20 = _sma(w_closes, min(20, len(w_closes)))
+    current = w_closes[-1]
+
+    detail["w_ma5"]  = round(w_ma5,  0)
+    detail["w_ma10"] = round(w_ma10, 0)
+    detail["w_ma20"] = round(w_ma20, 0)
+
+    perfect_w  = current > w_ma5 > w_ma10 > w_ma20 > 0
+    partial_w  = current > w_ma10 > w_ma20 > 0
+
+    if not (perfect_w or partial_w):
+        detail["weekly_trend"] = "하락/횡보"
+        return 0, detail
+
+    detail["weekly_trend"] = "완전정배열" if perfect_w else "부분정배열"
+
+    # 2) 주봉 거래량 수축 확인 (최근 4주 < 이전 10주 평균)
+    if len(w_volumes) >= 14:
+        vol_recent4 = _sma(w_volumes[-4:], 4)
+        vol_prev10  = _sma(w_volumes[-14:-4], 10)
+        if vol_prev10 > 0:
+            w_vol_ratio = vol_recent4 / vol_prev10
+            detail["w_vol_ratio"] = round(w_vol_ratio, 2)
+            vol_contracting = w_vol_ratio < 0.8
+        else:
+            vol_contracting = False
+    else:
+        vol_contracting = False
+
+    # 3) 주봉 MA10 우상향
+    if len(w_closes) >= 15:
+        w_ma10_old = _sma(w_closes[:-4], 10)
+        w_ma10_rising = w_ma10 > w_ma10_old
+        detail["w_ma10_rising"] = w_ma10_rising
+    else:
+        w_ma10_rising = False
+
+    # 4) 주봉 VCP 수축 패턴 (간이)
+    w_swings = _find_swings(w_closes, window=2)  # 주봉은 window=2
+    w_corrections = []
+    i = 0
+    while i < len(w_swings) - 1:
+        if w_swings[i][2] == "peak":
+            for j in range(i+1, len(w_swings)):
+                if w_swings[j][2] == "trough":
+                    p, t = w_swings[i][1], w_swings[j][1]
+                    if p > 0:
+                        c = (p - t) / p * 100
+                        if c >= 3.0:
+                            w_corrections.append(c)
+                    i = j
+                    break
+            else:
+                i += 1
+        else:
+            i += 1
+
+    w_recent = [c for c in w_corrections[-3:] if c >= 3.0]
+    w_vcp = (len(w_recent) >= 2 and
+             all(w_recent[k] > w_recent[k+1] for k in range(len(w_recent)-1)))
+    detail["w_vcp"] = w_vcp
+    if w_vcp:
+        detail["w_corrections"] = [round(c, 1) for c in w_recent]
+
+    # 점수 결정
+    if perfect_w and w_vcp and w_ma10_rising:
+        bonus = 5
+        detail["weekly_signal"] = "강함"
+    elif (perfect_w or partial_w) and (w_vcp or vol_contracting):
+        bonus = 3
+        detail["weekly_signal"] = "보통"
+    elif partial_w and w_ma10_rising:
+        bonus = 2
+        detail["weekly_signal"] = "약함"
+
+    return bonus, detail
+
+
 def calc_rsi(closes: list, period: int = 14) -> float:
     """RSI 계산 (Wilder 방식)"""
     if len(closes) < period + 1:
@@ -150,7 +306,11 @@ def calc_vcp_score(bars: list) -> tuple:
 
 
 def calc_stage2_score(bars: list) -> tuple:
-    """Stage 2 정배열 점수 (0~20)"""
+    """
+    Stage 2 정배열 점수 (0~20)
+    개선: MA60 기울기 단순 여부 → 각도 세분화 (강/중/약)
+         최근 N일 이내 정배열 전환 감지 (진입 초기 가산)
+    """
     if len(bars) < 20:
         return 0, {}
 
@@ -164,26 +324,56 @@ def calc_stage2_score(bars: list) -> tuple:
     current = closes[-1]
 
     if current > ma5 > ma20 > ma60 and ma60 > 0:
-        score += 15          # 완전 정배열 (12→15)
+        score += 15
         detail["perfect_alignment"] = True
     elif current > ma20 > ma60 and ma60 > 0:
-        score += 10          # 부분 정배열 (7→10)
+        score += 10
         detail["partial_alignment"] = True
     elif current > ma20:
-        score += 5           # 최소 요건 (3→5)
+        score += 5
 
     detail["ma5"]  = round(ma5, 0)
     detail["ma20"] = round(ma20, 0)
     detail["ma60"] = round(ma60, 0)
 
-    # 60일선 우상향
+    # ── MA60 기울기 세분화 (단순 여부 → 각도 등급) ──────────────────
+    # 기존: 우상향이면 무조건 +5점
+    # 개선: 기울기 강도에 따라 +2 / +3 / +5점으로 세분화
+    #   - 강: 10일 기준 기울기 > 0.3% → +5점 (뚜렷한 상승 추세)
+    #   - 중: 0.1~0.3%              → +3점 (완만한 상승)
+    #   - 약: 0~0.1%                → +2점 (수평 근접, 최소 확인)
+    #   - 하락                      → 0점 (정배열이어도 MA60 하락 시 감점 없음, 점수 미부여)
     if len(closes) >= 65:
-        ma60_old = _sma(closes[:-5], min(60, len(closes) - 5))
-        if ma60 > ma60_old:
-            score += 5
-            detail["ma60_rising"] = True
+        ma60_5ago  = _sma(closes[:-5],  min(60, len(closes) - 5))
+        ma60_10ago = _sma(closes[:-10], min(60, len(closes) - 10))
 
-    # 52주 위치 보너스 제거 — position_score(0~10점)에서 이미 반영하므로 이중 계산 방지
+        if ma60_10ago > 0:
+            slope_10d = (ma60 - ma60_10ago) / ma60_10ago * 100  # 10일 기울기(%)
+            detail["ma60_slope_10d"] = round(slope_10d, 3)
+
+            if slope_10d >= 0.3:
+                score += 5
+                detail["ma60_rising"] = "강"
+            elif slope_10d >= 0.1:
+                score += 3
+                detail["ma60_rising"] = "중"
+            elif slope_10d >= 0.0:
+                score += 2
+                detail["ma60_rising"] = "약"
+            else:
+                detail["ma60_rising"] = False
+
+    # ── 정배열 전환 시점 보너스 (+2점) ──────────────────────────────
+    # 최근 10일 이내에 정배열로 전환된 경우 (진입 초기 = 가장 유리한 타이밍)
+    # 조건: 10일 전엔 MA5 < MA20이었는데 현재 MA5 > MA20
+    if len(closes) >= 30 and score >= 10:  # 기본 정배열 조건 충족 시만
+        ma5_10ago  = _sma(closes[:-10], 5)
+        ma20_10ago = _sma(closes[:-10], 20)
+        was_below = ma5_10ago <= ma20_10ago  # 10일 전엔 역배열/횡보
+        is_above  = ma5 > ma20               # 현재 정배열
+        if was_below and is_above:
+            score += 2
+            detail["alignment_breakout"] = True  # 정배열 전환 신호
 
     return min(score, 20), detail
 
@@ -213,6 +403,31 @@ def calc_rsi_score(bars: list) -> tuple:
         if rsi > rsi_prev and 40 <= rsi <= 75:
             score = min(score + 2, 15)
             detail["rsi_rising"] = True
+
+    # ── RSI 베어리시 다이버전스 감지 (경고 플래그 + 감점) ──────────
+    # 조건: 최근 가격이 신고점인데 RSI 고점이 낮아지는 경우
+    # 의미: 상승 모멘텀 약화 → 조만간 조정 가능성
+    # 처리: 감점 -3점 + divergence 경고 플래그 (추천에서 제외는 안 함, 신호만 표시)
+    if len(closes) >= 30:
+        # 최근 15일 내 가격 신고점 여부
+        recent_high  = max(closes[-15:])
+        prev_high    = max(closes[-30:-15])
+        price_new_high = recent_high > prev_high * 1.02  # 2% 이상 신고점
+
+        if price_new_high:
+            # RSI 고점 비교 (같은 기간)
+            rsi_recent = calc_rsi(closes[-15:])
+            rsi_prev15 = calc_rsi(closes[-30:-15])
+            rsi_lower  = rsi_recent < rsi_prev15 - 5  # RSI 5pt 이상 낮아짐
+
+            if rsi_lower:
+                score = max(0, score - 3)
+                detail["bearish_divergence"] = True
+                detail["divergence_detail"] = {
+                    "price_new_high": round(recent_high, 0),
+                    "rsi_recent":     round(rsi_recent, 1),
+                    "rsi_prev":       round(rsi_prev15, 1),
+                }
 
     return score, detail
 
@@ -391,7 +606,13 @@ def calc_nexus_score(
     frgn_s,   frgn_d   = calc_frgn_score(investor_data)
     vrate_s,  vrate_d  = calc_vol_rate_score(price_data, is_market_open)
 
-    total = vcp_s + stage2_s + rsi_s + vol_s + pos_s + frgn_s + vrate_s
+    # 주봉 VCP 병행 검증 보너스 (일봉 데이터로 주봉 계산, 추가 API 호출 없음)
+    # 일봉 VCP 조건이 충족된 경우에만 주봉 확인 (성능 최적화)
+    weekly_bonus, weekly_d = 0, {}
+    if vcp_s >= 8:  # 일봉 VCP 부분 이상 충족 시에만 주봉 검증
+        weekly_bonus, weekly_d = calc_weekly_vcp_bonus(bars)
+
+    total = vcp_s + stage2_s + rsi_s + vol_s + pos_s + frgn_s + vrate_s + weekly_bonus
 
     # 등급 기준 현실화
     if total >= 65:
@@ -417,13 +638,14 @@ def calc_nexus_score(
         "total": total,
         "grade": grade,
         "breakdown": {
-            "vcp":     {"score": vcp_s,    "max": 30, **vcp_d},
-            "stage2":  {"score": stage2_s, "max": 20, **stage2_d},
-            "rsi":     {"score": rsi_s,    "max": 15, **rsi_d},
-            "volume":  {"score": vol_s,    "max": 15, **vol_d},
-            "position":{"score": pos_s,    "max": 10, **pos_d},
-            "frgn":    {"score": frgn_s,   "max": 10, **frgn_d},
-            "vol_rate":{"score": vrate_s,  "max": 5,  **vrate_d},
+            "vcp":        {"score": vcp_s,       "max": 30, **vcp_d},
+            "stage2":     {"score": stage2_s,    "max": 20, **stage2_d},
+            "rsi":        {"score": rsi_s,        "max": 15, **rsi_d},
+            "volume":     {"score": vol_s,        "max": 15, **vol_d},
+            "position":   {"score": pos_s,        "max": 10, **pos_d},
+            "frgn":       {"score": frgn_s,       "max": 10, **frgn_d},
+            "vol_rate":   {"score": vrate_s,      "max":  5, **vrate_d},
+            "weekly_vcp": {"score": weekly_bonus, "max":  5, **weekly_d},
         },
         "candles": candles,
     }

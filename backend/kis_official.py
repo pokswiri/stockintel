@@ -254,10 +254,11 @@ def is_kis_available() -> bool:
     return bool(KIS_APP_KEY and KIS_APP_SECRET)
 
 
-async def fetch_daily_chart(code: str, days: int = 70) -> dict:
+async def fetch_daily_chart(code: str, days: int = 140) -> dict:
     """
     공식 KIS REST API로 일봉 차트 조회 (pykis 불필요)
     TR_ID: FHKST03010100
+    days=140: 주봉 28개 확보 → 주봉 VCP 병행 검증 활성화 (기존 70→140)
     """
     token = await get_token()
     if not token:
