@@ -217,11 +217,20 @@ async def run_nexus(
 
     # ── 4. 1차 점수 (외국인 없이) → 상위 15개만 외국인 상세 조회 ────
     prelim = []
+    prelim_errors = []
     for code in valid_codes:
         bars = charts[code]["bars"]
         pd   = price_data.get(code, {})
-        s    = calc_nexus_score(bars, charts[code], {}, pd, market_open)
-        prelim.append((code, s["total"]))
+        try:
+            s = calc_nexus_score(bars, charts[code], {}, pd, market_open)
+            prelim.append((code, s["total"]))
+        except Exception as e:
+            import traceback as _tb
+            prelim_errors.append(code)
+            if len(prelim_errors) <= 3:
+                print(f"[NEXUS] 1차 점수 오류 ({code}): {e}\n{_tb.format_exc()[:400]}")
+    if prelim_errors:
+        print(f"[NEXUS] 1차 점수 오류 총 {len(prelim_errors)}개: {prelim_errors[:5]}")
     prelim.sort(key=lambda x: x[1], reverse=True)
     top15 = [c for c, _ in prelim[:15]]
 

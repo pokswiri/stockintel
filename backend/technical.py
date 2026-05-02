@@ -594,7 +594,39 @@ def calc_nexus_score(
     """
     NEXUS Score 종합 계산
     등급 기준: HIGH>=65 / MID>=50 / LOW<50 (현실화)
+    예외 발생 시 0점 dict 반환 (파이프라인 중단 방지)
     """
+    try:
+        return _calc_nexus_score_inner(
+            bars, stock_meta, investor_data, price_data, is_market_open
+        )
+    except Exception as e:
+        import traceback as _tb
+        print(f"[TECHNICAL] calc_nexus_score 예외: {e}\n{_tb.format_exc()[:400]}")
+        return {
+            "total": 0, "grade": "LOW",
+            "breakdown": {
+                "vcp": {"score": 0, "max": 30},
+                "stage2": {"score": 0, "max": 20},
+                "rsi": {"score": 0, "max": 15, "error": str(e)[:80]},
+                "volume": {"score": 0, "max": 15},
+                "position": {"score": 0, "max": 10},
+                "frgn": {"score": 0, "max": 10},
+                "vol_rate": {"score": 0, "max": 5},
+                "weekly_vcp": {"score": 0, "max": 5},
+            },
+            "candles": [],
+            "_error": str(e)[:100],
+        }
+
+
+def _calc_nexus_score_inner(
+    bars: list,
+    stock_meta: dict,
+    investor_data: dict,
+    price_data: dict,
+    is_market_open: bool = True,
+) -> dict:
     w52h = stock_meta.get("week52_high", 0) or 0
     w52l = stock_meta.get("week52_low",  0) or 0
 
@@ -610,7 +642,10 @@ def calc_nexus_score(
     # 일봉 VCP 조건이 충족된 경우에만 주봉 확인 (성능 최적화)
     weekly_bonus, weekly_d = 0, {}
     if vcp_s >= 8:  # 일봉 VCP 부분 이상 충족 시에만 주봉 검증
-        weekly_bonus, weekly_d = calc_weekly_vcp_bonus(bars)
+        try:
+            weekly_bonus, weekly_d = calc_weekly_vcp_bonus(bars)
+        except Exception as _we:
+            weekly_d = {"skip": f"주봉 계산 오류: {str(_we)[:50]}"}
 
     total = vcp_s + stage2_s + rsi_s + vol_s + pos_s + frgn_s + vrate_s + weekly_bonus
 
