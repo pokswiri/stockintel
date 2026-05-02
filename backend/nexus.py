@@ -372,7 +372,12 @@ async def run_nexus(
                 "has_investor": bool(inv),
             })
         except Exception as e:
+            import traceback
+            err_detail = traceback.format_exc()
             errors.append({"code": code, "error": str(e)})
+            # 첫 번째 에러만 상세 출력 (반복 방지)
+            if len(errors) == 1:
+                print(f"[NEXUS] 스코어링 오류 샘플 ({code}): {e}\n{err_detail[:500]}")
 
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
     print(f"[NEXUS] 스코어링 완료 | scored={len(scored)} | HIGH={len([s for s in scored if s['nexus']['grade']=='HIGH'])} MID={len([s for s in scored if s['nexus']['grade']=='MID'])} errors={len(errors)}")
