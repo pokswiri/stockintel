@@ -314,6 +314,11 @@ async def run_nexus(
             continue  # 중간 급등 + 극과열 → 제외
 
         try:
+            # sector_key를 먼저 정의 (이후 모멘텀 가중치 및 scored.append에서 사용)
+            sector_key = meta.get("sector_key", "")
+            if not sector_key or sector_key == "unknown":
+                sector_key = _guess_sector_from_price(code, pd_)
+
             nexus = calc_nexus_score(
                 bars, charts[code], inv, pd_, market_open)
 
@@ -329,9 +334,6 @@ async def run_nexus(
                     nexus["grade"] = "LOW"
 
             # ── 섹터 모멘텀 가중치 ──────────────────────────────────
-            # AI가 선정한 섹터의 strength(1~5)에 비례해 점수 가산
-            # strength 5 → +5점 / 4 → +3점 / 3 → +1점 / 1~2 → 0점
-            # 뉴스 모멘텀이 강한 섹터 종목을 우선 추천하는 효과
             sk = sector_key or meta.get("sector_key", "")
             if sk and sector_strength:
                 st = sector_strength.get(sk, 0)
@@ -347,7 +349,6 @@ async def run_nexus(
                     nexus["total"] = nexus["total"] + momentum_bonus
                     nexus["sector_momentum_bonus"] = momentum_bonus
                     nexus["sector_strength"] = st
-                    # 보너스 후 등급 재계산
                     if nexus["total"] >= 65:
                         nexus["grade"] = "HIGH"
                     elif nexus["total"] >= 50:
@@ -358,11 +359,6 @@ async def run_nexus(
                      or ((bars[-1]["close"] - bars[-2]["close"])
                          / bars[-2]["close"] * 100
                          if len(bars) >= 2 else 0))
-
-            # sector_key: 하드코딩 목록에 없으면 현재가 업종명으로 매핑
-            sector_key = meta.get("sector_key", "")
-            if not sector_key or sector_key == "unknown":
-                sector_key = _guess_sector_from_price(code, pd_)
 
             scored.append({
                 "code":         code,
