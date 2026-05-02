@@ -190,6 +190,32 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
 /* COLOR */
 .up{color:var(--green)}.dn{color:var(--red)}.neut{color:var(--txt3)}
 
+/* ── 성과 추적 ─────────────────────────────────── */
+.perf-stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:9px}
+.perf-stat{background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:10px;text-align:center}
+.perf-stat-val{font-size:17px;font-weight:700;font-family:var(--mono);margin-bottom:2px}
+.perf-stat-lbl{font-size:10px;color:var(--txt3)}
+.perf-grade-row{display:flex;flex-direction:column;gap:5px;margin-bottom:9px}
+.perf-grade-item{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.perf-grade-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.perf-grade-name{font-size:12px;font-weight:700}
+.perf-grade-cnt{font-size:10px;color:var(--txt3)}
+.perf-period-row{display:flex;gap:5px}
+.perf-period{flex:1;text-align:center;background:var(--bg3);border-radius:6px;padding:5px 2px}
+.perf-period-lbl{font-size:9px;color:var(--txt3);margin-bottom:2px}
+.perf-period-val{font-size:12px;font-weight:700;font-family:var(--mono)}
+.perf-rec-item{padding:11px 0;border-bottom:1px solid var(--line2)}
+.perf-rec-item:last-child{border-bottom:none;padding-bottom:0}
+.perf-rec-item:first-child{padding-top:0}
+.perf-rec-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.perf-rec-name{font-size:13px;font-weight:600}
+.perf-rec-meta{font-size:10px;color:var(--txt3);margin-bottom:5px}
+.perf-rec-rets{display:flex;gap:4px;flex-wrap:wrap}
+.perf-ret-chip{font-size:10px;padding:2px 6px;border-radius:4px;font-family:var(--mono);font-weight:600}
+.perf-empty{text-align:center;padding:32px 16px;color:var(--txt3);font-size:13px}
+.perf-load{text-align:center;padding:20px;color:var(--txt3);font-size:12px}
+.perf-refresh{font-size:11px;color:var(--accent2);background:none;border:none;cursor:pointer;padding:4px 0;display:block;margin:8px auto 0}
+
 @media(max-width:380px){.b-hl{font-size:15px}.stk-name,.scc-name{font-size:13px}}
 
 /* ── NEXUS SCORE ───────────────────────────── */
@@ -292,7 +318,8 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
       <button class="tb on" onclick="tab('issues',this)">🔥 이슈</button>
       <button class="tb" onclick="tab('news',this)">📰 뉴스</button>
       <button class="tb" onclick="tab('kr',this)">🇰🇷 국내</button>
-            <button class="tb" onclick="tab('risk',this)">⚠️ 리스크</button>
+      <button class="tb" onclick="tab('risk',this)">⚠️ 리스크</button>
+      <button class="tb" onclick="tab('perf',this);loadPerf()">📈 성과</button>
     </div>
 
     <div class="sec on" id="s-issues">
@@ -330,6 +357,13 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
     <div class="sec" id="s-risk">
       <div class="lbl">주요 리스크 요인</div>
       <div id="risk"></div>
+    </div>
+
+    <div class="sec" id="s-perf">
+      <div class="lbl">NEXUS 추천 성과 추적</div>
+      <div id="perf-content">
+        <div class="card perf-load">불러오는 중...</div>
+      </div>
     </div>
 
     <div class="disc">⚠ 본 분석은 AI가 뉴스를 수집·분석한 참고 정보입니다. 투자 권유가 아니며, 실제 투자 결정은 본인 판단과 전문가 상담을 통해 하시기 바랍니다.</div>
@@ -551,24 +585,36 @@ function renderNexusCard(s, isWatch=false) {
 
   const safeNum = (v, d=0) => (typeof v === 'number' && isFinite(v)) ? v : d;
   const rows = [
-    {lbl:'VCP',   score:safeNum(bd.vcp?.score),    max:25,
-     detail: bd.vcp?.vcp_contracting
-       ? '조정 ' + (bd.vcp.vcp_contracting||[]).map(v=>safeNum(v).toFixed(0)+'%').join('→')
-       : bd.vcp?.vcp_partial ? '패턴 형성중' : '-'},
+    {lbl:'VCP',   score:safeNum(bd.vcp?.score),    max:30,
+     detail: bd.vcp?.breakout_vol
+       ? `🚀 돌파캔들 ${bd.vcp.breakout_candle?.vol_ratio||''}x`
+       : bd.vcp?.vcp_contracting
+         ? '조정 ' + (bd.vcp.vcp_contracting||[]).map(v=>safeNum(v).toFixed(0)+'%').join('→')
+         : bd.vcp?.vcp_partial ? '패턴 형성중' : '-'},
     {lbl:'추세',   score:safeNum(bd.stage2?.score),  max:20,
-     detail: bd.stage2?.perfect_alignment ? '완전 정배열' : bd.stage2?.partial_alignment ? '부분 정배열' : '-'},
+     detail: bd.stage2?.alignment_breakout
+       ? '🔄 정배열 전환'
+       : bd.stage2?.perfect_alignment ? '완전 정배열' : bd.stage2?.partial_alignment ? '부분 정배열' : '-'},
     {lbl:'RSI',   score:safeNum(bd.rsi?.score),     max:15,
-     detail: 'RSI ' + safeNum(bd.rsi?.rsi).toFixed(1)},
+     detail: bd.rsi?.bearish_divergence
+       ? `⚠️ 다이버전스`
+       : 'RSI ' + safeNum(bd.rsi?.rsi).toFixed(1)},
     {lbl:'거래량', score:safeNum(bd.volume?.score),  max:15,
      detail: bd.volume?.vol_recovery ? '수축→회복' : bd.volume?.vol_squeeze ? '수축중' : bd.volume?.vol_surge ? '급증' : '비율 '+(bd.volume?.vol_ratio_5_20||'-')},
     {lbl:'52주',  score:safeNum(bd.position?.score), max:10,
      detail: bd.position?.week52_position != null ? safeNum(bd.position.week52_position).toFixed(1)+'%' : '-'},
     {lbl:'외국인', score:safeNum(bd.frgn?.score),    max:10,
-     detail: bd.frgn?.frgn_5d != null
-       ? (bd.frgn.frgn_5d >= 0 ? '+' : '') + Math.round(bd.frgn.frgn_5d/10000) + '만주'
-       : '-'},
+     detail: bd.frgn?.dual_buy ? '🤝 외인+기관'
+       : bd.frgn?.frgn_net_negative ? '⚠️ 5일 순매도'
+       : bd.frgn?.frgn_5d != null
+         ? (bd.frgn.frgn_5d >= 0 ? '+' : '') + Math.round(bd.frgn.frgn_5d/10000) + '만주'
+         : '-'},
     {lbl:'거래량↑', score:safeNum(bd.vol_rate?.score), max:5,
      detail: bd.vol_rate?.volume_rate ? '전일비 '+bd.vol_rate.volume_rate+'%' : bd.vol_rate?.note || '-'},
+    {lbl:'주봉',   score:safeNum(bd.weekly_vcp?.score), max:5,
+     detail: bd.weekly_vcp?.weekly_signal
+       ? (bd.weekly_vcp.weekly_signal==='강함'?'📊 주봉 강함':bd.weekly_vcp.weekly_signal==='보통'?'📊 주봉 보통':'📊 주봉 약함')
+       : bd.weekly_vcp?.skip ? '데이터 부족' : '-'},
   ];
 
   const rowsHtml = rows.map(r => `
@@ -589,6 +635,9 @@ function renderNexusCard(s, isWatch=false) {
           ${s.sector_key && s.sector_key !== '기타' && s.sector_key !== 'unknown' ? `<span class="nx-sector">${esc(s.sector_key)}</span>` : ''}
           ${s.source === 'anchor' ? '<span style="font-size:10px;color:var(--txt3)">⚓보완</span>' : s.source === 'realtime_frgn' ? '<span style="font-size:10px;color:var(--teal)">📡실시간</span>' : '<span style="font-size:10px;color:var(--amber)">📰주목</span>'}
           ${bd.frgn?.dual_buy ? '<span style="font-size:10px;color:var(--teal)">🤝 외인+기관</span>' : ''}
+          ${nx.small_cap_penalty ? '<span style="font-size:10px;color:var(--txt3)">⚠️소형주</span>' : ''}
+          ${nx.sector_momentum_bonus ? `<span style="font-size:10px;color:var(--accent2)">🔥모멘텀+${nx.sector_momentum_bonus}</span>` : ''}
+          ${bd.rsi?.bearish_divergence ? '<span style="font-size:10px;color:var(--red)">⚠️다이버전스</span>' : ''}
         </div>
       </div>
       <div class="nx-right">
@@ -668,6 +717,137 @@ async function go(){
   }catch(e){
     showErr(e.name==='TimeoutError'?'서버 응답 시간 초과. 잠시 후 다시 시도해 주세요':e.message||'알 수 없는 오류');
   }
+}
+
+let _perfLoaded = false;
+
+async function loadPerf(force=false) {
+  if (_perfLoaded && !force) return;
+  const el = document.getElementById('perf-content');
+  el.innerHTML = '<div class="card perf-load">불러오는 중...</div>';
+  try {
+    const res = await fetch(API + '/performance', {signal: AbortSignal.timeout(10000)});
+    if (!res.ok) throw new Error('서버 오류 ' + res.status);
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    el.innerHTML = renderPerf(d);
+    _perfLoaded = true;
+  } catch(e) {
+    el.innerHTML = `<div class="card"><div class="perf-empty">성과 데이터를 불러올 수 없습니다.<br><span style="font-size:11px;color:var(--txt3)">${esc(e.message)}</span><br><button class="perf-refresh" onclick="loadPerf(true)">다시 시도</button></div></div>`;
+  }
+}
+
+function renderPerf(d) {
+  if (!d || d.total_count === 0) {
+    return `<div class="card"><div class="perf-empty">
+      📊 아직 추천 이력이 없습니다.<br>
+      <span style="font-size:11px">분석을 실행하면 NEXUS 추천 종목이 자동 저장됩니다.</span>
+      <button class="perf-refresh" onclick="loadPerf(true)">새로고침</button>
+    </div></div>`;
+  }
+
+  // 요약 통계
+  const total = d.total_count || 0;
+  const recs  = d.records || [];
+  const withRet = recs.filter(r => Object.keys(r.returns||{}).length > 0).length;
+  const gs = d.grade_stats || {};
+
+  // 전체 d1 수익률 평균
+  let allD1 = [];
+  Object.values(gs).forEach(g => { if (g.d1) allD1 = allD1.concat(Array(g.d1.count).fill(g.d1.avg)); });
+  const avgD1 = allD1.length ? (allD1.reduce((a,b)=>a+b,0)/allD1.length).toFixed(1) : null;
+
+  let html = '';
+
+  // 요약 카드
+  html += `<div class="perf-stat-grid">
+    <div class="perf-stat">
+      <div class="perf-stat-val">${total}</div>
+      <div class="perf-stat-lbl">총 추천</div>
+    </div>
+    <div class="perf-stat">
+      <div class="perf-stat-val">${withRet}</div>
+      <div class="perf-stat-lbl">수익률 확인</div>
+    </div>
+    <div class="perf-stat">
+      <div class="perf-stat-val ${avgD1===null?'':parseFloat(avgD1)>=0?'up':'dn'}">${avgD1!==null?(parseFloat(avgD1)>=0?'+':'')+avgD1+'%':'—'}</div>
+      <div class="perf-stat-lbl">평균 1일</div>
+    </div>
+  </div>`;
+
+  // 등급별 수익률
+  const gradeOrder = ['HIGH','MID','LOW'];
+  const gradeLabel = {HIGH:'🔴 HIGH',MID:'🟡 MID',LOW:'⚪ LOW'};
+  const gradeColor = {HIGH:'var(--red)',MID:'var(--amber)',LOW:'var(--txt3)'};
+  const periods    = [{key:'d1',lbl:'1일'},{key:'d3',lbl:'3일'},{key:'d5',lbl:'5일'},{key:'d10',lbl:'10일'}];
+
+  const gradeRows = gradeOrder.filter(g => gs[g]).map(g => {
+    const gd = gs[g];
+    const cnt = gd.d1?.count || gd.d3?.count || gd.d5?.count || 0;
+    const perHtml = periods.map(p => {
+      const pd = gd[p.key];
+      if (!pd) return `<div class="perf-period"><div class="perf-period-lbl">${p.lbl}</div><div class="perf-period-val" style="color:var(--txt3)">—</div></div>`;
+      const cls = pd.avg >= 0 ? 'up' : 'dn';
+      const sign = pd.avg >= 0 ? '+' : '';
+      return `<div class="perf-period">
+        <div class="perf-period-lbl">${p.lbl}</div>
+        <div class="perf-period-val ${cls}">${sign}${pd.avg}%</div>
+        <div style="font-size:9px;color:var(--txt3)">${pd.win_rate}% 승</div>
+      </div>`;
+    }).join('');
+    return `<div class="perf-grade-item">
+      <div class="perf-grade-head">
+        <span class="perf-grade-name" style="color:${gradeColor[g]}">${gradeLabel[g]}</span>
+        <span class="perf-grade-cnt">${cnt}건</span>
+      </div>
+      <div class="perf-period-row">${perHtml}</div>
+    </div>`;
+  }).join('');
+
+  if (gradeRows) {
+    html += `<div class="lbl" style="margin-top:12px">등급별 평균 수익률</div>
+    <div class="perf-grade-row card" style="padding:12px">${gradeRows}</div>`;
+  }
+
+  // 최근 추천 이력
+  html += `<div class="lbl" style="margin-top:4px">최근 추천 이력</div>
+  <div class="card">`;
+
+  const sorted = [...recs].sort((a,b) => (b.rec_date||'').localeCompare(a.rec_date||''));
+
+  if (!sorted.length) {
+    html += '<div class="perf-empty" style="padding:16px">추천 이력 없음</div>';
+  } else {
+    sorted.forEach(r => {
+      const grade = r.grade || 'LOW';
+      const gc = gradeColor[grade] || 'var(--txt3)';
+      const gl = gradeLabel[grade] || grade;
+      const date = (r.rec_date||'').slice(0,10);
+      const rets = r.returns || {};
+
+      const retChips = periods.map(p => {
+        if (!(p.key in rets)) return `<span class="perf-ret-chip" style="background:var(--bg3);color:var(--txt3)">${p.lbl} —</span>`;
+        const v = rets[p.key];
+        const cls = v >= 0 ? 'var(--green)' : 'var(--red)';
+        const bg  = v >= 0 ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)';
+        return `<span class="perf-ret-chip" style="background:${bg};color:${cls}">${p.lbl} ${v>=0?'+':''}${v}%</span>`;
+      }).join('');
+
+      html += `<div class="perf-rec-item">
+        <div class="perf-rec-top">
+          <span class="perf-rec-name">${esc(r.name||r.code)}</span>
+          <span style="font-size:10px;font-weight:700;color:${gc}">${gl}</span>
+        </div>
+        <div class="perf-rec-meta">${esc(r.code)} · ${esc(r.sector||'—')} · ${date} · ${r.rec_price?r.rec_price.toLocaleString()+'원 추천':'가격 미기록'} · 점수 ${r.score||0}</div>
+        <div class="perf-rec-rets">${retChips}</div>
+      </div>`;
+    });
+  }
+
+  html += `<button class="perf-refresh" onclick="loadPerf(true)">새로고침</button>`;
+  html += '</div>';
+
+  return html;
 }
 </script>
 </body>
