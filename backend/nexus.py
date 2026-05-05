@@ -393,39 +393,115 @@ async def run_nexus(
     scored.sort(key=lambda x: x["nexus"]["total"], reverse=True)
     print(f"[NEXUS] 스코어링 완료 | scored={len(scored)} | HIGH={len([s for s in scored if s['nexus']['grade']=='HIGH'])} MID={len([s for s in scored if s['nexus']['grade']=='MID'])} errors={len(errors)}")
 
-    # ── 6. 섹터 다양성 보장 + 점수순 top_n개 ────────────────────────
-    # 원칙: 같은 섹터에서 1개만 선택 (동일 섹터 독점 방지)
-    # 순서: 점수 높은 것부터, 해당 섹터 첫 번째만 선택
-    # 보완: top_n 미달 시 이미 선택한 섹터에서 추가로 채움
-    high_list = [s for s in scored if s["nexus"]["grade"] == "HIGH"]
-    mid_list  = [s for s in scored if s["nexus"]["grade"] == "MID"]
-    low_list  = [s for s in scored if s["nexus"]["grade"] == "LOW"]
+    # ── 6. 주도 섹터 쿼터 기반 top_n 선정 ───────────────────────────
+    #
+    # 핵심 원칙:
+    #   - AI가 선정한 주도 섹터 수에 따라 쿼터를 먼저 결정
+    #   - 각 섹터 쿼터 내에서 HIGH → MID → LOW 순서로 선택
+    #   - 쿼터 미달(섹터에 유효 종목 없음) 시 다른 섹터로 이월
+    #   - 최종 미달 시 전체 scored에서 점수순 보완
+    #
+    # 쿼터 계산:
+    #   섹터 3개 이상 → 1:1:1
+    #   섹터 2개     → strength 비율 (1.5배 이상 차이면 2:1, 아니면 1:1+보완)
+    #   섹터 1개     → 3:0
+    #   섹터 0개     → 전체 점수순
 
-    # 1단계: 섹터별 1개씩 (점수순)
-    seen_sectors = set()
-    diverse_top  = []
-    for s in scored:
-        sk = s.get("sector_key", "") or "기타"
-        if sk not in seen_sectors:
-            seen_sectors.add(sk)
-            diverse_top.append(s)
-        if len(diverse_top) >= top_n:
-            break
+    def _calc_sector_quota(keys: list, strength: dict, n: int) -> list:
+        """
+        주도 섹터별 쿼터 리스트 반환
+        예: [("finance",2), ("semiconductor",1)]
+        strength가 1.5배 이상 차이날 때만 2:1, 나머지는 균등 배분
+        """
+        nk = len(keys)
+        if nk == 0:
+            return []
+        if nk == 1:
+            return [(keys[0], n)]
+        if nk >= 3:
+            # 3개 섹터: 1:1:1 (top_n=3 기준)
+            quotas = []
+            for i, k in enumerate(keys[:n]):
+                quotas.append((k, 1))
+            return quotas
 
-    # 2단계: top_n 미달이면 이미 선택된 섹터에서 점수순으로 보완
-    if len(diverse_top) < top_n:
-        selected_codes = {s["code"] for s in diverse_top}
-        for s in scored:
-            if s["code"] not in selected_codes:
-                diverse_top.append(s)
-                selected_codes.add(s["code"])
-            if len(diverse_top) >= top_n:
-                break
+        # 2개 섹터
+        s0 = strength.get(keys[0], 3)
+        s1 = strength.get(keys[1], 3)
+        if s0 >= s1 * 1.5:
+            # 첫 섹터가 1.5배 이상 강함 → 2:1
+            return [(keys[0], 2), (keys[1], 1)]
+        else:
+            # 비슷한 강도 → 1:1 (나머지 1개는 보완 단계)
+            return [(keys[0], 1), (keys[1], 1)]
 
-    final_top = diverse_top[:top_n]
+    def _fill_quota(scored_all: list, quota_list: list, top_n: int) -> list:
+        """
+        쿼터에 따라 종목 선정
+        1) 각 섹터에서 HIGH → MID → LOW 순으로 쿼터 채움
+        2) 쿼터 미달 시 남은 쿼터를 이월 풀에 적립
+        3) 이월 풀 → AI 섹터 외 전체 점수순으로 보완
+        """
+        result     = []
+        used_codes = set()
+        carry_over = 0  # 미달 이월량
+
+        for sk, quota in quota_list:
+            sk_candidates = [
+                s for s in scored_all
+                if s.get("sector_key", "") == sk
+                and s["code"] not in used_codes
+            ]
+            filled = 0
+            for grade in ["HIGH", "MID", "LOW"]:
+                for s in sk_candidates:
+                    if filled >= quota:
+                        break
+                    if s["nexus"]["grade"] == grade and s["code"] not in used_codes:
+                        result.append(s)
+                        used_codes.add(s["code"])
+                        filled += 1
+            carry_over += (quota - filled)
+
+        # 이월 + 쿼터 합산 미달 → 전체에서 HIGH → MID → LOW 보완
+        total_need = top_n - len(result)
+        if total_need > 0:
+            for grade in ["HIGH", "MID", "LOW"]:
+                for s in scored_all:
+                    if len(result) >= top_n:
+                        break
+                    if s["nexus"]["grade"] == grade and s["code"] not in used_codes:
+                        result.append(s)
+                        used_codes.add(s["code"])
+
+        return result[:top_n]
+
+    # 실제 선정
+    quota_list = _calc_sector_quota(sector_keys, sector_strength, top_n)
+
+    if quota_list:
+        final_top = _fill_quota(scored, quota_list, top_n)
+    else:
+        # 섹터 정보 없음 → 전체 점수순 (HIGH 우선)
+        final_top = []
+        used_codes: set = set()
+        for grade in ["HIGH", "MID", "LOW"]:
+            for s in scored:
+                if len(final_top) >= top_n:
+                    break
+                if s["nexus"]["grade"] == grade and s["code"] not in used_codes:
+                    final_top.append(s)
+                    used_codes.add(s["code"])
+
+    final_top = final_top[:top_n]
 
     for s in final_top:
-        s["display_grade"] = s["nexus"]["grade"]  # HIGH/MID/LOW 뱃지
+        s["display_grade"] = s["nexus"]["grade"]
+
+    quota_summary = [(sk, q) for sk, q in quota_list] if quota_list else []
+    actual_grades = [(s["name"], s["nexus"]["grade"], s["nexus"]["total"],
+                      s.get("sector_key","")) for s in final_top]
+    print(f"[NEXUS] top{top_n} | 쿼터={quota_summary} | 선정={actual_grades}")
 
     wd = datetime.now().weekday()
     scan_mode = ("전체시장·전일기준" if (wd >= 5 and ai_failed)
