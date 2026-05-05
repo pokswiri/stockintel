@@ -222,7 +222,11 @@ async def run_nexus(
         bars = charts[code]["bars"]
         pd   = price_data.get(code, {})
         try:
-            s = calc_nexus_score(bars, charts[code], {}, pd, market_open)
+            s = calc_nexus_score(
+                bars,
+                {**charts[code], "mktcap": pd.get("mktcap", 0)},
+                {}, pd, market_open
+            )
             prelim.append((code, s["total"]))
         except Exception as e:
             import traceback as _tb
@@ -320,15 +324,17 @@ async def run_nexus(
                 sector_key = _guess_sector_from_price(code, pd_)
 
             nexus = calc_nexus_score(
-                bars, charts[code], inv, pd_, market_open)
+                bars,
+                {**charts[code], "mktcap": mktcap},  # mktcap 주입
+                inv, pd_, market_open)
 
             # 시총 2000~5000억 소형주 페널티 -5점
             if is_small_cap:
                 nexus["total"] = max(0, nexus["total"] - 5)
                 nexus["small_cap_penalty"] = True
-                if nexus["total"] >= 65:
+                if nexus["total"] >= 80:
                     nexus["grade"] = "HIGH"
-                elif nexus["total"] >= 50:
+                elif nexus["total"] >= 60:
                     nexus["grade"] = "MID"
                 else:
                     nexus["grade"] = "LOW"
@@ -349,9 +355,9 @@ async def run_nexus(
                     nexus["total"] = nexus["total"] + momentum_bonus
                     nexus["sector_momentum_bonus"] = momentum_bonus
                     nexus["sector_strength"] = st
-                    if nexus["total"] >= 65:
+                    if nexus["total"] >= 80:
                         nexus["grade"] = "HIGH"
-                    elif nexus["total"] >= 50:
+                    elif nexus["total"] >= 60:
                         nexus["grade"] = "MID"
 
             price = pd_.get("price") or (bars[-1]["close"] if bars else 0)

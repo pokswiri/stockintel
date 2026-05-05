@@ -1,41 +1,96 @@
 # -*- coding: utf-8 -*-
 """
-tracker.py
+tracker.py v2
 NEXUS 추천 종목 성과 추적 모듈
 
-기능:
-  - 추천 시점 가격 자동 저장 (JSON 파일)
-  - 1일/3일/5일/10일 후 수익률 자동 계산
-  - 등급(HIGH/MID/LOW)별 통계
-  - /performance 엔드포인트로 프론트에 노출
+저장 위치:
+  - TRACK_FILE 환경변수로 설정 (기본: /tmp/nexus_track.json)
+  - Railway Volume 마운트 시: TRACK_FILE=/data/nexus_track.json 설정
+  - 자동 백업: {TRACK_FILE}.bak (저장 시마다 갱신)
+  - 로드 실패 시 백업에서 자동 복구
 
-저장 위치: /tmp/nexus_track.json (Railway ephemeral storage)
-영구 보존 필요 시: Railway Volume 마운트 또는 외부 DB 연동 권장
+데이터 구조 버전: 2
 """
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 TRACK_FILE = os.getenv("TRACK_FILE", "/tmp/nexus_track.json")
+BACKUP_FILE = TRACK_FILE + ".bak"
+CURRENT_VERSION = 2
+
+
+def _validate(data: dict) -> bool:
+    """데이터 구조 유효성 검사"""
+    return (
+        isinstance(data, dict)
+        and "records" in data
+        and isinstance(data["records"], list)
+    )
 
 
 def _load() -> dict:
-    """추적 데이터 로드"""
+    """
+    추적 데이터 로드
+    1차: TRACK_FILE 로드
+    2차: 실패 시 BACKUP_FILE 자동 복구
+    3차: 둘 다 실패 시 빈 데이터 반환
+    """
+    # 1차 시도
     try:
         with open(TRACK_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"records": [], "version": 2}
+            data = json.load(f)
+        if _validate(data):
+            return data
+        print(f"[TRACKER] 데이터 검증 실패 — 백업 복구 시도")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[TRACKER] 로드 오류: {e} — 백업 복구 시도")
 
-
-def _save(data: dict):
-    """추적 데이터 저장"""
+    # 2차: 백업에서 복구
     try:
+        with open(BACKUP_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if _validate(data):
+            print(f"[TRACKER] 백업에서 복구 성공 ({len(data['records'])}개 레코드)")
+            _save_raw(data)  # 메인 파일에 복구
+            return data
+    except Exception:
+        pass
+
+    return {"records": [], "version": CURRENT_VERSION}
+
+
+def _save_raw(data: dict):
+    """파일에 직접 저장 (백업 없이)"""
+    try:
+        os.makedirs(os.path.dirname(TRACK_FILE) or ".", exist_ok=True)
         with open(TRACK_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[TRACKER] 저장 실패: {e}")
+
+
+def _save(data: dict):
+    """
+    추적 데이터 저장 + 백업
+    순서: 1) 메인 저장 2) 백업 저장
+    """
+    try:
+        os.makedirs(os.path.dirname(TRACK_FILE) or ".", exist_ok=True)
+        with open(TRACK_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 백업 저장 (메인 저장 성공 시에만)
+        try:
+            with open(BACKUP_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as be:
+            print(f"[TRACKER] 백업 저장 실패 (무시): {be}")
+    except Exception as e:
+        print(f"[TRACKER] 저장 실패: {e}")
+        raise
 
 
 def save_recommendations(nexus_top: list, analyzed_at: str = None):
@@ -125,70 +180,114 @@ def update_returns(price_fetcher_fn):
         print(f"[TRACKER] {updated}개 수익률 업데이트")
 
 
-async def update_returns_async(batch_price_fn):
+async def update_returns_async(batch_price_fn, fetch_chart_fn=None):
     """
     비동기 수익률 업데이트 — /analyze 호출 시 자동 실행
-    batch_price_fn: [codes] → {code: {price: ...}} (KIS batch_fetch_prices)
 
-    주말/공휴일엔 전일 종가가 그대로 유지되므로 거래일 기준 delta 계산
+    개선: 거래일 기반 정확한 d1/d3/d5/d10 계산
+    - 기존: '분석 실행 시점 현재가' 기준 (d1~d10이 같은 값이 되는 왜곡)
+    - 개선: 일봉 차트에서 추천일 이후 N번째 거래일 종가 추출
+    - fetch_chart_fn이 없으면 현재가 기준으로 폴백
+
+    rec_price=0 방어: 추천 당시 가격 미기록 시 수익률 계산 스킵
+    KST 기준 날짜: analyzed_at이 UTC인 경우 +9h 보정
     """
+    from datetime import timezone, timedelta as _td
+
     data    = _load()
     today   = datetime.now().date()
     weekday = today.weekday()
 
-    # 업데이트 대상 선별 (수익률이 아직 채워지지 않은 구간이 있는 것만)
+    # 업데이트 대상 선별
     targets_by_code: dict = {}
     for rec in data["records"]:
         try:
-            rec_date  = datetime.fromisoformat(rec["rec_date"]).date()
-            delta     = (today - rec_date).days
+            rec_date_str = rec.get("rec_date", "")
+            # KST 보정: ISO 포맷에 timezone 없으면 로컬(KST)로 간주
+            rec_dt = datetime.fromisoformat(rec_date_str)
+            rec_date = rec_dt.date()
+            delta = (today - rec_date).days
             rec_price = rec.get("rec_price", 0)
         except Exception:
             continue
-        if rec_price <= 0 or delta <= 0:
+
+        # rec_price=0 방어
+        if rec_price <= 0:
             continue
 
-        # 주말엔 가격 조회 불가 → 스킵
-        if weekday >= 5:
+        # 추천 당일 or 주말엔 스킵 (다음 거래일 아직 미도래)
+        if delta <= 0 or weekday >= 5:
             continue
 
         needed = []
-        if delta >= 1  and "d1"  not in rec["returns"]: needed.append("d1")
-        if delta >= 3  and "d3"  not in rec["returns"]: needed.append("d3")
-        if delta >= 5  and "d5"  not in rec["returns"]: needed.append("d5")
-        if delta >= 10 and "d10" not in rec["returns"]: needed.append("d10")
+        if delta >= 1  and "d1"  not in rec["returns"]: needed.append(("d1",  1))
+        if delta >= 3  and "d3"  not in rec["returns"]: needed.append(("d3",  3))
+        if delta >= 5  and "d5"  not in rec["returns"]: needed.append(("d5",  5))
+        if delta >= 10 and "d10" not in rec["returns"]: needed.append(("d10", 10))
 
         if needed:
-            targets_by_code[rec["code"]] = {
+            if rec["code"] not in targets_by_code:
+                targets_by_code[rec["code"]] = []
+            targets_by_code[rec["code"]].append({
                 "rec": rec,
                 "needed": needed,
                 "rec_price": rec_price,
-            }
+                "rec_date": rec_date,
+            })
 
     if not targets_by_code:
         return
 
-    # 현재가 일괄 조회
-    try:
-        prices = await batch_price_fn(list(targets_by_code.keys()))
-    except Exception as e:
-        print(f"[TRACKER] 가격 조회 실패: {e}")
-        return
-
     updated = 0
-    for code, info in targets_by_code.items():
-        cur_price = prices.get(code, {}).get("price", 0)
-        if not cur_price or cur_price <= 0:
-            continue
-        ret_pct = round((cur_price - info["rec_price"]) / info["rec_price"] * 100, 2)
-        for key in info["needed"]:
-            info["rec"]["returns"][key] = ret_pct
-        info["rec"]["updated_at"] = datetime.now().isoformat()
-        updated += 1
+
+    for code, rec_list in targets_by_code.items():
+        # 일봉 차트 조회로 정확한 거래일별 종가 추출 시도
+        chart_bars = None
+        if fetch_chart_fn:
+            try:
+                chart = await fetch_chart_fn(code)
+                chart_bars = chart.get("bars", []) if chart else None
+            except Exception:
+                chart_bars = None
+
+        # 현재가 조회 (차트 실패 시 폴백)
+        cur_price = 0
+        try:
+            prices = await batch_price_fn([code])
+            cur_price = prices.get(code, {}).get("price", 0)
+        except Exception:
+            pass
+
+        for item in rec_list:
+            rec       = item["rec"]
+            rec_date  = item["rec_date"]
+            rec_price = item["rec_price"]
+
+            for period_key, n_days in item["needed"]:
+                target_price = None
+
+                if chart_bars:
+                    # 추천일 이후 N번째 거래일 종가 찾기
+                    after_bars = [
+                        b for b in chart_bars
+                        if b.get("date", "") > rec_date.strftime("%Y%m%d")
+                    ]
+                    if len(after_bars) >= n_days:
+                        target_price = after_bars[n_days - 1]["close"]
+
+                # 차트 없거나 데이터 부족 시 현재가 폴백
+                if not target_price and cur_price > 0:
+                    target_price = cur_price
+
+                if target_price and target_price > 0:
+                    ret_pct = round((target_price - rec_price) / rec_price * 100, 2)
+                    rec["returns"][period_key] = ret_pct
+                    rec["updated_at"] = datetime.now().isoformat()
+                    updated += 1
 
     if updated > 0:
         _save(data)
-        print(f"[TRACKER] {updated}개 수익률 자동 업데이트 완료")
+        print(f"[TRACKER] {updated}개 수익률 자동 업데이트 완료 (거래일 기반)")
 
 
 def get_performance_stats() -> dict:

@@ -791,10 +791,10 @@ async def analyze(
         try:
             if nexus_result.get("available") and nexus_result.get("top"):
                 save_recommendations(nexus_result["top"], analyzed_at)
-            # 기존 추천 종목 수익률 업데이트 (백그라운드, 실패해도 무시)
+            # 기존 추천 종목 수익률 업데이트 (거래일 기반 정확한 d1/d3/d5/d10)
             if is_kis_available():
-                from kis_official import batch_fetch_prices as _bfp
-                await update_returns_async(_bfp)
+                from kis_official import batch_fetch_prices as _bfp, fetch_daily_chart as _fdc
+                await update_returns_async(_bfp, fetch_chart_fn=_fdc)
         except Exception as e:
             print(f"[TRACKER] 오류: {e}")
 

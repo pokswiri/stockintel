@@ -516,9 +516,8 @@ def calc_position_score(bars: list, week52_high: float = 0, week52_low: float = 
 
 def calc_frgn_score(investor_data: dict) -> tuple:
     """
-    외국인 순매수 점수 (0~10)
+    외국인 순매수 점수 (0~10) — 하위 호환 유지용 (money_flow_score로 대체됨)
     - frgn_5d(5일 합계)가 음수이면 positive_days 점수를 절반으로 제한
-      (3일 많이 사고 2일 크게 판 경우 수급 방향성 불일치 방지)
     """
     if not investor_data:
         return 0, {}
@@ -535,7 +534,6 @@ def calc_frgn_score(investor_data: dict) -> tuple:
     detail["inst_5d"]          = inst_5d
     detail["positive_days"]    = positive_days
 
-    # 5일 중 순매수 일수 기준
     if positive_days == 5:
         base = 8
     elif positive_days == 4:
@@ -547,19 +545,321 @@ def calc_frgn_score(investor_data: dict) -> tuple:
     else:
         base = 0
 
-    # frgn_5d 합계가 음수 → 일수 점수 절반 (매수일이 있어도 전체 방향이 매도)
     if frgn_5d < 0 and base > 0:
         base = base // 2
         detail["frgn_net_negative"] = True
 
     score += base
 
-    # 외국인+기관 동시 매수 보너스 (합계 모두 양수인 경우만)
     if frgn_5d > 0 and inst_5d > 0:
         score += 2
         detail["dual_buy"] = True
 
     return min(score, 10), detail
+
+
+def calc_candle_signal_score(bars: list) -> tuple:
+    """
+    캔들 패턴 기반 '분출 직전' 시그널 점수 (0~25)
+
+    ① 매집 도지 + 장대양봉 + 지지 확인 시퀀스 (최대 12점)
+       낮은 가격대에서 거래량 많은 윗꼬리 캔들 → 장대양봉 → 지지 유지
+       = 매물대 소화 후 상승 직전 패턴
+
+    ② 쌍바닥 + 넥라인 돌파 (최대 8점)
+       두 유사 저점 → 중간 고점(넥라인) 돌파 + 거래량
+
+    ③ 적삼병 (최대 5점)
+       3일 연속 양봉, 각 봉 시가가 전봉 몸통 내 시작
+
+    ④ 컵앤핸들 간이 감지 (최대 8점)
+       U자 회복 + 얕은 핸들 조정 + 돌파
+
+    총합 cap: 25점
+    """
+    if len(bars) < 25:
+        return 0, {}
+
+    score  = 0
+    detail = {}
+
+    closes  = [b["close"]  for b in bars]
+    opens   = [b["open"]   for b in bars]
+    highs   = [b["high"]   for b in bars]
+    lows    = [b["low"]    for b in bars]
+    volumes = [b["volume"] for b in bars]
+    n = len(bars)
+
+    vol_20avg = _sma(volumes, 20) or 1
+
+    # ── ① 매집 도지 + 장대양봉 + 지지 확인 ─────────────────────────
+    # 최근 40일 내에서 시퀀스 탐색
+    search_range = min(40, n - 5)
+    doji_idx     = None
+    bigbull_idx  = None
+
+    for i in range(n - search_range, n - 3):
+        # 매집 도지 조건
+        body  = abs(closes[i] - opens[i])
+        upper = highs[i] - max(closes[i], opens[i])
+        lower = lows[i]  - min(closes[i], opens[i]) if False else (min(closes[i], opens[i]) - lows[i])
+        total_range = highs[i] - lows[i] or 1
+
+        is_doji    = body / total_range < 0.35           # 몸통이 전체의 35% 미만
+        has_upper  = upper > body * 2                    # 윗꼬리 > 몸통 × 2
+        high_vol   = volumes[i] > vol_20avg * 1.5        # 거래량 1.5배 이상
+        low_price  = closes[i] < _sma(closes[:i+1], min(20, i+1))  # 20일선 아래 (낮은 가격대)
+
+        if is_doji and has_upper and high_vol and low_price:
+            doji_idx = i
+            break  # 가장 오래된 것 기준
+
+    if doji_idx is not None:
+        detail["accum_doji_idx"] = doji_idx - n  # 음수 인덱스로 표기
+        # 도지 이후 장대양봉 탐색
+        for i in range(doji_idx + 1, n - 1):
+            body_pct = (closes[i] - opens[i]) / opens[i] * 100 if opens[i] > 0 else 0
+            is_bullish_big = closes[i] > opens[i] and body_pct >= 3.0
+            big_vol        = volumes[i] > vol_20avg * 2.0
+
+            if is_bullish_big and big_vol:
+                bigbull_idx = i
+                detail["bigbull_idx"]  = bigbull_idx - n
+                detail["bigbull_body"] = round(body_pct, 1)
+                break
+
+    if doji_idx is not None and bigbull_idx is not None:
+        # 지지 확인: 장대양봉 이후 현재까지 장대양봉 저가 이탈 없음
+        support_level = lows[bigbull_idx]
+        days_since    = n - 1 - bigbull_idx
+        min_low_after = min(lows[bigbull_idx+1:]) if bigbull_idx + 1 < n else closes[-1]
+        support_ok    = min_low_after >= support_level * 0.98  # 2% 이내 이탈 허용
+
+        if support_ok and 2 <= days_since <= 30:
+            score += 12
+            detail["accum_seq"] = "완성"
+            detail["support_ok"] = True
+            detail["days_since_bigbull"] = days_since
+        elif bigbull_idx is not None:
+            score += 7
+            detail["accum_seq"] = "부분(지지미확인)"
+    elif doji_idx is not None:
+        score += 3
+        detail["accum_seq"] = "도지만"
+
+    # ── ② 쌍바닥 + 넥라인 돌파 ──────────────────────────────────────
+    swings = _find_swings(closes, window=4)
+    troughs = [(idx, price) for idx, price, t in swings if t == "trough"]
+    peaks   = [(idx, price) for idx, price, t in swings if t == "peak"]
+
+    double_bottom = False
+    if len(troughs) >= 2:
+        t1_idx, t1_price = troughs[-2]
+        t2_idx, t2_price = troughs[-1]
+        gap_days = t2_idx - t1_idx
+
+        # 두 저점 유사 수준 (±5% 이내) + 간격 10~50일
+        if 10 <= gap_days <= 50 and abs(t1_price - t2_price) / (t1_price or 1) <= 0.05:
+            # 두 저점 사이 고점(넥라인) 찾기
+            neckline_peaks = [p for idx, p in peaks if t1_idx < idx < t2_idx]
+            if neckline_peaks:
+                neckline = max(neckline_peaks)
+                current  = closes[-1]
+
+                # 현재가가 넥라인 돌파 중 (0~5% 위)
+                if neckline < current <= neckline * 1.08:
+                    neckline_vol = volumes[-1] > vol_20avg * 1.5
+                    if neckline_vol:
+                        score += 8
+                    else:
+                        score += 4
+                    double_bottom = True
+                    detail["double_bottom"] = {
+                        "t1": round(t1_price, 0),
+                        "t2": round(t2_price, 0),
+                        "neckline": round(neckline, 0),
+                        "current": round(current, 0),
+                        "gap_days": gap_days,
+                    }
+
+    # ── ③ 적삼병 ─────────────────────────────────────────────────────
+    if n >= 5:
+        b1, b2, b3 = bars[-3], bars[-2], bars[-1]
+        c1, c2, c3 = b1["close"], b2["close"], b3["close"]
+        o1, o2, o3 = b1["open"],  b2["open"],  b3["open"]
+
+        all_bullish  = c1 > o1 and c2 > o2 and c3 > o3
+        rising       = c1 < c2 < c3
+        # 각 봉 시가가 전봉 몸통 내 시작
+        o2_in_body1  = o1 <= o2 <= c1
+        o3_in_body2  = o2 <= o3 <= c2
+        # 각 봉 2% 이상 몸통
+        body1_pct = (c1 - o1) / o1 * 100 if o1 > 0 else 0
+        body2_pct = (c2 - o2) / o2 * 100 if o2 > 0 else 0
+        body3_pct = (c3 - o3) / o3 * 100 if o3 > 0 else 0
+        big_bodies = body1_pct >= 1.5 and body2_pct >= 1.5 and body3_pct >= 1.5
+
+        if all_bullish and rising and o2_in_body1 and o3_in_body2 and big_bodies:
+            score += 5
+            detail["three_white_soldiers"] = True
+
+    # ── ④ 컵앤핸들 간이 감지 ─────────────────────────────────────────
+    if n >= 40:
+        # 최근 40~80일 구간에서 컵 탐색
+        scan = bars[-min(80, n):]
+        sc   = [b["close"] for b in scan]
+        sn   = len(sc)
+
+        if sn >= 30:
+            left_peak_idx  = sc.index(max(sc[:sn//2]))       # 좌측 고점
+            left_peak      = sc[left_peak_idx]
+            trough_val     = min(sc[left_peak_idx:])          # 컵 바닥
+            trough_idx_rel = sc[left_peak_idx:].index(trough_val) + left_peak_idx
+
+            # 컵 조건: 하락 15~40%, U자 반등
+            drop_pct = (left_peak - trough_val) / left_peak * 100
+            if 12 <= drop_pct <= 45 and trough_idx_rel < sn - 5:
+                recovery = sc[-1]
+                recovery_pct = (recovery - trough_val) / (left_peak - trough_val) * 100
+
+                # 80% 이상 회복 (컵 오른쪽)
+                if recovery_pct >= 75:
+                    # 핸들: 최근 5~15일 내 5~20% 조정
+                    handle_range = sc[max(0, sn-15):]
+                    handle_high  = max(handle_range)
+                    handle_low   = min(handle_range)
+                    handle_drop  = (handle_high - handle_low) / handle_high * 100 if handle_high > 0 else 0
+
+                    if 3 <= handle_drop <= 20:
+                        # 핸들 상단 돌파 여부
+                        if sc[-1] >= handle_high * 0.97:
+                            cup_vol = volumes[-1] > vol_20avg * 1.3
+                            score += 8 if cup_vol else 5
+                            detail["cup_handle"] = {
+                                "drop_pct": round(drop_pct, 1),
+                                "recovery_pct": round(recovery_pct, 1),
+                                "handle_drop": round(handle_drop, 1),
+                            }
+
+    return min(score, 25), detail
+
+
+def calc_money_flow_score(bars: list, investor_data: dict, mktcap: int = 0) -> tuple:
+    """
+    자금 흐름 집중도 점수 (0~20) — 기존 calc_frgn_score(0~10) 대체·확장
+
+    ① 거래대금 이상 급증 (0~8점)
+       bars의 amount(거래대금) 필드 활용
+       거래대금은 거래량보다 "큰 손의 진입"을 더 정확히 반영
+
+    ② 외국인+기관 동시 매집 강도 (0~8점)
+       합산 순매수를 시총 대비 비율로 환산해 강도 측정
+
+    ③ 기관 순매수 가속 (0~4점)
+       최근 5일 기관이 20일 평균보다 빠르게 사고 있는지
+    """
+    detail = {}
+    score  = 0
+
+    # ── ① 거래대금 급증 ──────────────────────────────────────────────
+    amounts = [b.get("amount", 0) for b in bars]
+    amounts_nonzero = [a for a in amounts if a > 0]
+
+    if len(amounts_nonzero) >= 20:
+        amt_5avg  = _sma(amounts, 5)
+        amt_20avg = _sma(amounts, 20)
+
+        if amt_20avg > 0:
+            amt_ratio = amt_5avg / amt_20avg
+            detail["amt_ratio_5_20"] = round(amt_ratio, 2)
+
+            if amt_ratio >= 2.5:
+                score += 8
+                detail["money_surge"] = "강"
+            elif amt_ratio >= 1.8:
+                score += 5
+                detail["money_surge"] = "중"
+            elif amt_ratio >= 1.3:
+                score += 3
+                detail["money_surge"] = "약"
+            elif amt_ratio >= 1.0:
+                score += 1
+    elif amounts_nonzero:
+        # 데이터 부족 시 거래량으로 대체
+        vol_20avg = _sma([b["volume"] for b in bars], 20) or 1
+        vol_5avg  = _sma([b["volume"] for b in bars], 5)
+        ratio = vol_5avg / vol_20avg
+        detail["amt_fallback_vol_ratio"] = round(ratio, 2)
+        if ratio >= 1.8: score += 4
+        elif ratio >= 1.3: score += 2
+
+    # ── ② 외국인+기관 동시 매집 강도 ────────────────────────────────
+    if investor_data:
+        frgn_5d   = investor_data.get("frgn_5d", 0)
+        inst_5d   = investor_data.get("inst_5d", 0)
+        frgn_20d  = investor_data.get("frgn_20d", 0)
+        inst_20d  = investor_data.get("inst_20d", 0)
+        pos_days  = investor_data.get("frgn_positive_days_5", 0)
+        consec    = investor_data.get("frgn_consec_days", 0)
+        is_estimated = investor_data.get("is_estimated", False)
+
+        detail["frgn_5d"]   = frgn_5d
+        detail["inst_5d"]   = inst_5d
+        detail["pos_days"]  = pos_days
+        detail["consec"]    = consec
+        detail["is_estimated"] = is_estimated
+
+        combined_5d = frgn_5d + inst_5d
+
+        if combined_5d > 0:
+            # 시총 대비 비율로 강도 환산 (시총 없으면 절대값 기준)
+            if mktcap > 0:
+                # mktcap 단위: 억원 → 주식수 추정 (현재가로 역산)
+                cur_price = bars[-1]["close"] if bars else 0
+                if cur_price > 0:
+                    total_shares = (mktcap * 1e8) / cur_price  # 추정 발행주식수
+                    ratio = combined_5d / total_shares * 100   # % 비중
+                    detail["smart_money_ratio"] = round(ratio, 3)
+
+                    if ratio >= 0.5:
+                        score += 8
+                        detail["smart_money"] = "강"
+                    elif ratio >= 0.2:
+                        score += 5
+                        detail["smart_money"] = "중"
+                    elif ratio >= 0.05:
+                        score += 3
+                        detail["smart_money"] = "약"
+                    else:
+                        score += 1
+                        detail["smart_money"] = "미약"
+            else:
+                # 시총 미수신: 연속 매수 일수 기준 폴백
+                if pos_days == 5:   score += 6
+                elif pos_days == 4: score += 4
+                elif pos_days == 3: score += 3
+                elif pos_days >= 1: score += 1
+                if frgn_5d > 0 and inst_5d > 0:
+                    score += 2
+                    detail["dual_buy"] = True
+
+        elif frgn_5d < 0 and inst_5d < 0:
+            detail["smart_money"] = "쌍방매도"
+
+        # ── ③ 기관 순매수 가속 ──────────────────────────────────────
+        if inst_5d > 0 and inst_20d > 0:
+            # 5일 기관 매수 속도가 20일 평균보다 빠른지
+            inst_20d_rate = inst_20d / 4  # 5일 환산 기준값
+            if inst_20d_rate > 0:
+                accel = inst_5d / inst_20d_rate
+                detail["inst_accel"] = round(accel, 2)
+                if accel >= 1.5:
+                    score += 4
+                    detail["inst_accelerating"] = True
+                elif accel >= 1.0:
+                    score += 2
+
+    return min(score, 20), detail
 
 
 def calc_vol_rate_score(price_data: dict, is_market_open: bool = True) -> tuple:
@@ -606,14 +906,16 @@ def calc_nexus_score(
         return {
             "total": 0, "grade": "LOW",
             "breakdown": {
-                "vcp": {"score": 0, "max": 30},
-                "stage2": {"score": 0, "max": 20},
-                "rsi": {"score": 0, "max": 15, "error": str(e)[:80]},
-                "volume": {"score": 0, "max": 15},
-                "position": {"score": 0, "max": 10},
-                "frgn": {"score": 0, "max": 10},
-                "vol_rate": {"score": 0, "max": 5},
-                "weekly_vcp": {"score": 0, "max": 5},
+                "vcp":           {"score": 0, "max": 25},
+                "stage2":        {"score": 0, "max": 20},
+                "rsi":           {"score": 0, "max": 12, "error": str(e)[:80]},
+                "volume":        {"score": 0, "max": 10},
+                "position":      {"score": 0, "max":  8},
+                "money_flow":    {"score": 0, "max": 20},
+                "vol_rate":      {"score": 0, "max":  5},
+                "weekly_vcp":    {"score": 0, "max":  5},
+                "candle_signal": {"score": 0, "max": 25},
+                "frgn":          {"score": 0, "max":  0},
             },
             "candles": [],
             "_error": str(e)[:100],
@@ -627,32 +929,54 @@ def _calc_nexus_score_inner(
     price_data: dict,
     is_market_open: bool = True,
 ) -> dict:
-    w52h = stock_meta.get("week52_high", 0) or 0
-    w52l = stock_meta.get("week52_low",  0) or 0
+    w52h    = stock_meta.get("week52_high", 0) or 0
+    w52l    = stock_meta.get("week52_low",  0) or 0
+    mktcap  = stock_meta.get("mktcap", 0) or price_data.get("mktcap", 0) or 0
 
     vcp_s,    vcp_d    = calc_vcp_score(bars)
     stage2_s, stage2_d = calc_stage2_score(bars)
     rsi_s,    rsi_d    = calc_rsi_score(bars)
     vol_s,    vol_d    = calc_volume_score(bars, is_market_open)
     pos_s,    pos_d    = calc_position_score(bars, w52h, w52l)
-    frgn_s,   frgn_d   = calc_frgn_score(investor_data)
     vrate_s,  vrate_d  = calc_vol_rate_score(price_data, is_market_open)
 
-    # 주봉 VCP 병행 검증 보너스 (일봉 데이터로 주봉 계산, 추가 API 호출 없음)
-    # 일봉 VCP 조건이 충족된 경우에만 주봉 확인 (성능 최적화)
+    # 신규: 자금흐름 (기존 frgn 대체·확장)
+    mflow_s,  mflow_d  = calc_money_flow_score(bars, investor_data, mktcap)
+
+    # 신규: 캔들 시그널 (분출 직전 패턴)
+    candle_s, candle_d = calc_candle_signal_score(bars)
+
+    # 주봉 VCP 병행 검증 보너스
     weekly_bonus, weekly_d = 0, {}
-    if vcp_s >= 8:  # 일봉 VCP 부분 이상 충족 시에만 주봉 검증
+    if vcp_s >= 8:
         try:
             weekly_bonus, weekly_d = calc_weekly_vcp_bonus(bars)
         except Exception as _we:
             weekly_d = {"skip": f"주봉 계산 오류: {str(_we)[:50]}"}
 
-    total = vcp_s + stage2_s + rsi_s + vol_s + pos_s + frgn_s + vrate_s + weekly_bonus
+    # 기존 frgn_score는 money_flow_score로 대체됨 (하위 호환 표기용으로만 유지)
+    _, frgn_d = calc_frgn_score(investor_data)
 
-    # 등급 기준 현실화
-    if total >= 65:
+    # ── 점수 체계 v3 ────────────────────────────────────────────────
+    # VCP(25) + Stage2(20) + RSI(12) + Volume(10) + Position(8)
+    # + MoneyFlow(20) + VolRate(5) + WeeklyVCP(5) + CandleSignal(25)
+    # 총 130점 만점
+    # 등급 기준: HIGH≥80 / MID≥60 / LOW<60
+    total = (
+        min(vcp_s, 25)       +  # VCP 25점 cap
+        stage2_s             +  # 20점
+        min(rsi_s, 12)       +  # RSI 12점 cap
+        min(vol_s, 10)       +  # 거래량 10점 cap
+        min(pos_s, 8)        +  # 52주위치 8점 cap
+        mflow_s              +  # 자금흐름 20점
+        vrate_s              +  # 장중거래량비율 5점
+        weekly_bonus         +  # 주봉VCP 5점
+        candle_s                # 캔들시그널 25점
+    )
+
+    if total >= 80:
         grade = "HIGH"
-    elif total >= 50:
+    elif total >= 60:
         grade = "MID"
     else:
         grade = "LOW"
@@ -673,14 +997,17 @@ def _calc_nexus_score_inner(
         "total": total,
         "grade": grade,
         "breakdown": {
-            "vcp":        {"score": vcp_s,       "max": 30, **vcp_d},
-            "stage2":     {"score": stage2_s,    "max": 20, **stage2_d},
-            "rsi":        {"score": rsi_s,        "max": 15, **rsi_d},
-            "volume":     {"score": vol_s,        "max": 15, **vol_d},
-            "position":   {"score": pos_s,        "max": 10, **pos_d},
-            "frgn":       {"score": frgn_s,       "max": 10, **frgn_d},
-            "vol_rate":   {"score": vrate_s,      "max":  5, **vrate_d},
-            "weekly_vcp": {"score": weekly_bonus, "max":  5, **weekly_d},
+            "vcp":          {"score": min(vcp_s,25), "max": 25, **vcp_d},
+            "stage2":       {"score": stage2_s,      "max": 20, **stage2_d},
+            "rsi":          {"score": min(rsi_s,12), "max": 12, **rsi_d},
+            "volume":       {"score": min(vol_s,10), "max": 10, **vol_d},
+            "position":     {"score": min(pos_s, 8), "max":  8, **pos_d},
+            "money_flow":   {"score": mflow_s,       "max": 20, **mflow_d},
+            "vol_rate":     {"score": vrate_s,        "max":  5, **vrate_d},
+            "weekly_vcp":   {"score": weekly_bonus,   "max":  5, **weekly_d},
+            "candle_signal":{"score": candle_s,       "max": 25, **candle_d},
+            # 하위 호환: frgn 필드 유지 (프론트 표시용)
+            "frgn":         {"score": 0,              "max":  0, **frgn_d},
         },
         "candles": candles,
     }
