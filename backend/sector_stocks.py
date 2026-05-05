@@ -41,7 +41,6 @@ SECTOR_STOCKS = {
         {"code": "011790", "name": "SKC",          "cap": "mid"},    # 동박·반도체소재
         {"code": "036830", "name": "솔브레인",     "cap": "mid"},    # HF·식각액
         {"code": "336370", "name": "솔루스첨단소재","cap": "mid"},   # 동박·전자소재
-        {"code": "047050", "name": "포스코인터내셔널","cap": "mid"}, # 반도체소재
         # 장비·부품 (코스닥)
         {"code": "042700", "name": "한미반도체",   "cap": "mid"},    # HBM 핵심장비
         {"code": "240810", "name": "원익IPS",      "cap": "mid"},    # CVD 장비
@@ -81,10 +80,8 @@ SECTOR_STOCKS = {
         {"code": "077970", "name": "STX엔진",      "cap": "mid"},
         {"code": "071970", "name": "HD현대마린엔진","cap": "mid"},
         {"code": "267250", "name": "HD현대",       "cap": "large"},  # HD그룹 지주
-        {"code": "329180", "name": "HD현대중공업", "cap": "large"},
         # 중견 (코스닥)
         {"code": "065450", "name": "빅텍",         "cap": "mid"},
-        {"code": "014190", "name": "한국화인케미칼","cap": "mid"},   # 화약·방산
         {"code": "047560", "name": "퍼스텍",       "cap": "mid"},    # 항공부품
         {"code": "082600", "name": "동양에스텍",   "cap": "mid"},    # 방산전자
         {"code": "011210", "name": "현대위아",     "cap": "mid"},    # 자주포·엔진
@@ -150,7 +147,6 @@ SECTOR_STOCKS = {
         {"code": "383310", "name": "에코프로머티리얼즈","cap": "mid"},
         {"code": "020150", "name": "롯데에너지머티리얼즈","cap": "mid"}, # 동박
         {"code": "298040", "name": "효성중공업",   "cap": "mid"},    # ESS
-        {"code": "012400", "name": "한화갤러리아타임월드","cap": "mid"},
         {"code": "036490", "name": "에이피티씨",   "cap": "mid"},    # 배터리장비
         {"code": "007810", "name": "코리아써키트", "cap": "mid"},    # 배터리PCB
         {"code": "340570", "name": "수산인더스트리","cap": "mid"},   # 배터리장비
@@ -159,9 +155,7 @@ SECTOR_STOCKS = {
         {"code": "011070", "name": "LG이노텍",     "cap": "mid"},    # 배터리부품
         {"code": "009830", "name": "한화솔루션",   "cap": "large"},  # ESS·배터리
         {"code": "121600", "name": "나노신소재",   "cap": "mid"},    # CNT도전재
-        {"code": "294870", "name": "HDC현대산업개발","cap": "mid"},
-        {"code": "306200", "name": "세아베스틸지주","cap": "mid"},   # 배터리소재
-        {"code": "001430", "name": "세아베스틸지주","cap": "mid"},
+        {"code": "001430", "name": "세아베스틸지주","cap": "mid"},   # 배터리소재
         {"code": "267260", "name": "HD현대일렉트릭","cap": "mid"},   # ESS
     ],
 
@@ -273,6 +267,12 @@ SECTOR_STOCKS = {
         {"code": "175330", "name": "JB금융지주",   "cap": "mid"},
         {"code": "138930", "name": "BNK금융지주",  "cap": "mid"},
         {"code": "279570", "name": "케이뱅크",     "cap": "mid"},
+        {"code": "323410", "name": "카카오뱅크",   "cap": "mid"},
+        {"code": "001200", "name": "유진투자증권", "cap": "mid"},
+        {"code": "030610", "name": "교보증권",     "cap": "mid"},
+        {"code": "003470", "name": "유안타증권",   "cap": "mid"},
+        {"code": "018670", "name": "SK증권",       "cap": "mid"},
+        {"code": "001270", "name": "부국증권",     "cap": "mid"},
     ],
 
     # ── 철강·소재 ──────────────────────────────────────────────────
@@ -281,26 +281,20 @@ SECTOR_STOCKS = {
         {"code": "005490", "name": "POSCO홀딩스",  "cap": "large"},
         {"code": "004020", "name": "현대제철",     "cap": "large"},
         {"code": "002140", "name": "고려아연",     "cap": "large"},
-        {"code": "009150", "name": "삼성전기",     "cap": "large"},
         {"code": "047050", "name": "포스코인터내셔널","cap": "mid"},
         {"code": "001390", "name": "KG동국제강",   "cap": "mid"},
         {"code": "001430", "name": "세아베스틸지주","cap": "mid"},
         {"code": "004560", "name": "현대비앤지스틸","cap": "mid"},
-        # 중견
-        {"code": "006360", "name": "GS건설",       "cap": "mid"},
         {"code": "058430", "name": "포스코스틸리온", "cap": "mid"},    # 냉연강판
         {"code": "011500", "name": "한농화성",     "cap": "mid"},    # 화학소재
         {"code": "004000", "name": "롯데정밀화학", "cap": "mid"},    # 정밀화학
-        {"code": "011790", "name": "SKC",          "cap": "mid"},    # 소재
         {"code": "014820", "name": "동원시스템즈", "cap": "mid"},    # 포장소재
         {"code": "002380", "name": "KCC",          "cap": "mid"},    # 소재
         {"code": "010060", "name": "OCI홀딩스",    "cap": "mid"},    # 화학소재
-        {"code": "001070", "name": "대한방직",     "cap": "mid"},
         {"code": "011420", "name": "갑을메탈",     "cap": "mid"},    # 비철금속
         {"code": "010780", "name": "아이에스동서", "cap": "mid"},    # 환경소재
         {"code": "008350", "name": "남선알미늄",   "cap": "mid"},    # 알루미늄
         {"code": "005710", "name": "대주전자재료", "cap": "mid"},    # 전자소재
-        {"code": "025560", "name": "미래산업",     "cap": "mid"},    # 특수소재
     ],
 
     # ── 조선·중공업 (신규 섹터) ────────────────────────────────────
@@ -308,8 +302,7 @@ SECTOR_STOCKS = {
         {"code": "009540", "name": "HD현대중공업", "cap": "large"},
         {"code": "042660", "name": "한화오션",     "cap": "large"},
         {"code": "010140", "name": "삼성중공업",   "cap": "large"},
-        {"code": "267250", "name": "HD현대",       "cap": "large"},
-        {"code": "329180", "name": "HD현대중공업", "cap": "large"},
+        {"code": "267250", "name": "HD현대",       "cap": "large"},  # HD그룹 지주
         {"code": "071970", "name": "HD현대마린엔진","cap": "mid"},
         {"code": "077970", "name": "STX엔진",      "cap": "mid"},
         {"code": "222870", "name": "HD현대마린솔루션","cap": "mid"},
@@ -318,19 +311,14 @@ SECTOR_STOCKS = {
         {"code": "011200", "name": "HMM",          "cap": "large"},  # 해운
         {"code": "005880", "name": "대한해운",     "cap": "mid"},    # 해운
         {"code": "028050", "name": "삼성E&A",      "cap": "mid"},    # EPC
-        {"code": "047050", "name": "포스코인터내셔널","cap": "mid"},
-        {"code": "006490", "name": "인스코비",     "cap": "mid"},
-        {"code": "014190", "name": "한국화인케미칼","cap": "mid"},
-        {"code": "016740", "name": "두산",         "cap": "mid"},
-        {"code": "003570", "name": "SNT다이내믹스","cap": "mid"},
         {"code": "082260", "name": "HSD엔진",      "cap": "mid"},    # 선박엔진
-        {"code": "034020", "name": "두산에너빌리티","cap": "large"},
-        {"code": "267260", "name": "HD현대일렉트릭","cap": "mid"},
-        {"code": "001440", "name": "대한전선",     "cap": "mid"},
+        {"code": "034020", "name": "두산에너빌리티","cap": "large"},  # 원전·조선기자재
         {"code": "103590", "name": "일진전기",     "cap": "mid"},
         {"code": "298040", "name": "효성중공업",   "cap": "mid"},
         {"code": "010120", "name": "LS일렉트릭",   "cap": "mid"},
         {"code": "023160", "name": "태광",         "cap": "mid"},    # 조선기자재
+        {"code": "004490", "name": "세방전지",     "cap": "mid"},    # 선박ESS
+        {"code": "019180", "name": "인터지스",     "cap": "mid"},    # 해운
     ],
 }
 
