@@ -437,85 +437,124 @@ async def run_nexus(
 
     def _fill_quota(scored_all: list, quota_list: list, top_n: int) -> list:
         """
-        쿼터에 따라 종목 선정
-        1) 각 섹터 쿼터에서 HIGH → MID → LOW 순으로 채움
-        2) 미달 섹터의 이월분 → 다른 AI 섹터 중 HIGH 종목으로 우선 보완
-        3) 그래도 미달 시 → 전체 점수순 보완 (단, 특정 섹터 독점 방지)
+        쿼터 기반 종목 선정 최종 로직
+
+        원칙:
+        - HIGH가 존재하면 섹터 무관하게 HIGH 먼저 (등급 절대 우선)
+        - 섹터별 최대 허용: AI 섹터는 쿼터 값, 비AI 섹터는 1개
+        - 단일 섹터 전체 독점은 방지 (1섹터 제외)
+        - HIGH 소진 후 MID, MID 소진 후 LOW
         """
         result     = []
         used_codes = set()
-        # 섹터별 실제 선택 수 추적
-        sector_counts: dict = {sk: 0 for sk, _ in quota_list}
-        carry_over = 0
+        quota_map  = dict(quota_list)
+        quota_sectors = [sk for sk, _ in quota_list]
+        n_sectors  = len(quota_list)
 
-        # 1단계: 각 섹터 쿼터 채우기
-        for sk, quota in quota_list:
-            sk_candidates = [
-                s for s in scored_all
-                if s.get("sector_key", "") == sk
-                and s["code"] not in used_codes
-            ]
-            filled = 0
-            for grade in ["HIGH", "MID", "LOW"]:
-                for s in sk_candidates:
-                    if filled >= quota:
-                        break
-                    if s["nexus"]["grade"] == grade and s["code"] not in used_codes:
-                        result.append(s)
-                        used_codes.add(s["code"])
-                        sector_counts[sk] = sector_counts.get(sk, 0) + 1
-                        filled += 1
-            carry_over += (quota - filled)
+        # 섹터별 최대 허용량 계산
+        # - AI 섹터: 쿼터 값 (1섹터면 top_n까지)
+        # - 비AI 섹터: 1개
+        # - 1섹터일 때는 독점방지 없음
+        def max_allow(sk: str) -> int:
+            if n_sectors == 1:
+                return top_n  # 1섹터: 제한 없음
+            if sk in quota_map:
+                return quota_map[sk]  # AI 섹터: 쿼터 그대로
+            return 1  # 비AI 섹터: 1개
 
-        # 2단계: 이월분 → AI 섹터 내에서 HIGH 우선으로 추가 보완
-        # 단, 이미 쿼터를 채운 섹터에서는 최대 1개씩만 추가 허용
-        if carry_over > 0:
-            quota_map = dict(quota_list)
-            for grade in ["HIGH", "MID", "LOW"]:
-                for s in scored_all:
-                    if carry_over <= 0 or len(result) >= top_n:
-                        break
-                    sk = s.get("sector_key", "")
-                    if s["code"] in used_codes:
-                        continue
-                    if s["nexus"]["grade"] != grade:
-                        continue
-                    # AI 섹터 소속이면서 쿼터 초과 1개까지만 허용
-                    if sk in quota_map:
-                        max_allow = quota_map[sk] + 1  # 쿼터 + 이월 1개
-                        if sector_counts.get(sk, 0) < max_allow:
-                            result.append(s)
-                            used_codes.add(s["code"])
-                            sector_counts[sk] = sector_counts.get(sk, 0) + 1
-                            carry_over -= 1
+        def sector_priority(s):
+            sk = s.get("sector_key", "기타")
+            try:
+                return quota_sectors.index(sk)
+            except ValueError:
+                return len(quota_sectors)
 
-        # 3단계: 아직 미달 → AI 섹터 외 전체에서 HIGH 우선 보완
-        # 각 섹터 최대 1개씩만 추가 허용 (독점 방지)
-        # AI 섹터는 이미 2단계에서 이월 허용을 썼으므로 여기선 비AI 섹터 우선
+        # ── 1단계: 전체 HIGH, AI섹터 우선 + 섹터별 최대 허용량 적용 ─
+        all_highs = [s for s in scored_all if s["nexus"]["grade"] == "HIGH"]
+        all_highs.sort(key=lambda s: (sector_priority(s), -s["nexus"]["total"]))
+
+        cur: dict = {}
+        for s in all_highs:
+            if len(result) >= top_n:
+                break
+            sk = s.get("sector_key", "기타")
+            if cur.get(sk, 0) < max_allow(sk):
+                result.append(s)
+                used_codes.add(s["code"])
+                cur[sk] = cur.get(sk, 0) + 1
+
+        # HIGH 못 채운 쿼터 → 다른 섹터 HIGH로 추가 보완
+        # (예: semiconductor 쿼터 1인데 HIGH 없음 → finance HIGH 추가)
         if len(result) < top_n:
-            quota_map = dict(quota_list)
-            extra_sector_counts: dict = {}
+            extra_cur: dict = {}
+            for s in result:
+                sk = s.get("sector_key", "기타")
+                extra_cur[sk] = extra_cur.get(sk, 0) + 1
+
+            for s in all_highs:
+                if len(result) >= top_n:
+                    break
+                if s["code"] in used_codes:
+                    continue
+                sk = s.get("sector_key", "기타")
+                # 이미 쿼터 채운 섹터에서 1개 더 허용 (이월 보완)
+                extra_max = max_allow(sk) + 1 if sk in quota_map else 1
+                if extra_cur.get(sk, 0) < extra_max:
+                    result.append(s)
+                    used_codes.add(s["code"])
+                    extra_cur[sk] = extra_cur.get(sk, 0) + 1
+
+        # 2단계 MID: 점수 우선, AI 섹터 동점 시 우선
+        if len(result) < top_n:
+            c2: dict = {}
+            for s in result:
+                sk = s.get("sector_key", "기타")
+                c2[sk] = c2.get(sk, 0) + 1
+
+            all_mids = [s for s in scored_all
+                        if s["nexus"]["grade"] == "MID"
+                        and s["code"] not in used_codes]
+            # 점수 내림차순 우선, 동점 시 AI 섹터 순서
+            all_mids.sort(key=lambda s: (-s["nexus"]["total"], sector_priority(s)))
+
+            for s in all_mids:
+                if len(result) >= top_n:
+                    break
+                sk = s.get("sector_key", "기타")
+                mid_max = max_allow(sk)
+                if c2.get(sk, 0) < mid_max:
+                    result.append(s)
+                    used_codes.add(s["code"])
+                    c2[sk] = c2.get(sk, 0) + 1
+
+        # ── 3단계: 최후 수단 제한 해제 ──────────────────────────────
+        if len(result) < top_n:
             for grade in ["HIGH", "MID", "LOW"]:
                 for s in scored_all:
                     if len(result) >= top_n:
                         break
-                    if s["code"] in used_codes:
-                        continue
-                    if s["nexus"]["grade"] != grade:
-                        continue
-                    sk = s.get("sector_key", "기타")
-                    # AI 섹터면 이미 이월 허용량(quota+1)을 다 썼는지 확인
-                    if sk in quota_map:
-                        max_allow = quota_map[sk] + 1
-                        if sector_counts.get(sk, 0) >= max_allow:
-                            continue  # AI 섹터 초과 → 스킵
-                    # 비AI 섹터는 1개씩만 허용
-                    if extra_sector_counts.get(sk, 0) < 1:
+                    if s["code"] not in used_codes and s["nexus"]["grade"] == grade:
                         result.append(s)
                         used_codes.add(s["code"])
-                        extra_sector_counts[sk] = extra_sector_counts.get(sk, 0) + 1
-                        if sk in quota_map:
-                            sector_counts[sk] = sector_counts.get(sk, 0) + 1
+
+        return result[:top_n]
+
+        return result[:top_n]
+
+        return result[:top_n]
+
+        # ── 3단계: 독점 방지로 못 채웠으면 제한 해제하고 채움 ──────
+        # (scored에 특정 섹터 종목만 남은 극단적 상황)
+        if len(result) < top_n:
+            for grade in ["HIGH", "MID", "LOW"]:
+                for s in scored_all:
+                    if len(result) >= top_n:
+                        break
+                    if s["code"] not in used_codes and s["nexus"]["grade"] == grade:
+                        result.append(s)
+                        used_codes.add(s["code"])
+
+        return result[:top_n]
 
         return result[:top_n]
 
