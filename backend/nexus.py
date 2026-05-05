@@ -332,9 +332,9 @@ async def run_nexus(
             if is_small_cap:
                 nexus["total"] = max(0, nexus["total"] - 5)
                 nexus["small_cap_penalty"] = True
-                if nexus["total"] >= 80:
+                if nexus["total"] >= 65:
                     nexus["grade"] = "HIGH"
-                elif nexus["total"] >= 60:
+                elif nexus["total"] >= 45:
                     nexus["grade"] = "MID"
                 else:
                     nexus["grade"] = "LOW"
@@ -355,9 +355,9 @@ async def run_nexus(
                     nexus["total"] = nexus["total"] + momentum_bonus
                     nexus["sector_momentum_bonus"] = momentum_bonus
                     nexus["sector_strength"] = st
-                    if nexus["total"] >= 80:
+                    if nexus["total"] >= 65:
                         nexus["grade"] = "HIGH"
-                    elif nexus["total"] >= 60:
+                    elif nexus["total"] >= 45:
                         nexus["grade"] = "MID"
 
             price = pd_.get("price") or (bars[-1]["close"] if bars else 0)

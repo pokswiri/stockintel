@@ -388,13 +388,17 @@ def calc_rsi_score(bars: list) -> tuple:
     detail = {"rsi": rsi}
 
     if 50 <= rsi <= 70:
-        score = 15
+        score = 12   # 최적 구간
+    elif 70 < rsi <= 80:
+        score = 9    # 모멘텀 강한 구간 (기존 78까지만→80으로 확장)
+    elif 80 < rsi <= 90:
+        score = 5    # 과열 구간이나 강세장에선 지속 가능
+    elif rsi > 90:
+        score = 2    # 극과열, 감점은 하지 않음
     elif 45 <= rsi < 50:
-        score = 10
-    elif 70 < rsi <= 78:
         score = 7
     elif 40 <= rsi < 45:
-        score = 4
+        score = 3
     else:
         score = 0
 
@@ -429,12 +433,12 @@ def calc_rsi_score(bars: list) -> tuple:
                     "rsi_prev":       round(rsi_prev15, 1),
                 }
 
-    return score, detail
+    return min(score, 12), detail  # 최대 12점 (산식 cap과 일치)
 
 
 def calc_volume_score(bars: list, is_market_open: bool = True) -> tuple:
     """
-    거래량 수축·회복 패턴 점수 (0~15)
+    거래량 수축·회복 패턴 점수 (0~10)
     VCP와 중복 피해 수축 후 회복(돌파 시작)에 집중
     is_market_open: 장중이면 당일봉 미완성이므로 vol_surge는 volumes[-2] 기준
     """
@@ -479,7 +483,7 @@ def calc_volume_score(bars: list, is_market_open: bool = True) -> tuple:
                 detail["vol_surge"] = True
                 detail["vol_surge_basis"] = "prev_day" if is_market_open else "latest"
 
-    return min(score, 15), detail
+    return min(score, 10), detail  # 최대 10점 (산식 cap과 일치)
 
 
 def calc_position_score(bars: list, week52_high: float = 0, week52_low: float = 0) -> tuple:
@@ -503,13 +507,16 @@ def calc_position_score(bars: list, week52_high: float = 0, week52_low: float = 
         detail["week52_low"]      = round(l, 0)
         detail["using_api_data"]  = week52_high > 0
 
-        if 75 <= position <= 95:
-            score = 10
+        if position > 95:
+            score = 8    # 신고가 돌파 구간 (만점: 시세 분출 초기)
+            detail["near_breakout"] = True
+        elif 75 <= position <= 95:
+            score = 8    # 최적 구간
             detail["near_breakout"] = True
         elif 55 <= position < 75:
-            score = 6
+            score = 5
         elif 40 <= position < 55:
-            score = 3
+            score = 2
 
     return score, detail
 
@@ -961,7 +968,8 @@ def _calc_nexus_score_inner(
     # VCP(25) + Stage2(20) + RSI(12) + Volume(10) + Position(8)
     # + MoneyFlow(20) + VolRate(5) + WeeklyVCP(5) + CandleSignal(25)
     # 총 130점 만점
-    # 등급 기준: HIGH≥80 / MID≥60 / LOW<60
+    # 등급 기준: HIGH≥65 / MID≥45 / LOW<45
+    # (80/60 기준은 실제 우량 종목도 달성 불가능 — 현실화)
     total = (
         min(vcp_s, 25)       +  # VCP 25점 cap
         stage2_s             +  # 20점
@@ -974,9 +982,9 @@ def _calc_nexus_score_inner(
         candle_s                # 캔들시그널 25점
     )
 
-    if total >= 80:
+    if total >= 65:
         grade = "HIGH"
-    elif total >= 60:
+    elif total >= 45:
         grade = "MID"
     else:
         grade = "LOW"
