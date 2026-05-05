@@ -585,7 +585,7 @@ function renderNexusCard(s, isWatch=false) {
 
   const safeNum = (v, d=0) => (typeof v === 'number' && isFinite(v)) ? v : d;
   const rows = [
-    {lbl:'VCP',   score:safeNum(bd.vcp?.score),    max:30,
+    {lbl:'VCP',   score:safeNum(bd.vcp?.score),    max:25,
      detail: bd.vcp?.breakout_vol
        ? `🚀 돌파캔들 ${bd.vcp.breakout_candle?.vol_ratio||''}x`
        : bd.vcp?.vcp_contracting
@@ -595,26 +595,34 @@ function renderNexusCard(s, isWatch=false) {
      detail: bd.stage2?.alignment_breakout
        ? '🔄 정배열 전환'
        : bd.stage2?.perfect_alignment ? '완전 정배열' : bd.stage2?.partial_alignment ? '부분 정배열' : '-'},
-    {lbl:'RSI',   score:safeNum(bd.rsi?.score),     max:15,
+    {lbl:'RSI',   score:safeNum(bd.rsi?.score),     max:12,
      detail: bd.rsi?.bearish_divergence
        ? `⚠️ 다이버전스`
        : 'RSI ' + safeNum(bd.rsi?.rsi).toFixed(1)},
-    {lbl:'거래량', score:safeNum(bd.volume?.score),  max:15,
-     detail: bd.volume?.vol_recovery ? '수축→회복' : bd.volume?.vol_squeeze ? '수축중' : bd.volume?.vol_surge ? '급증' : '비율 '+(bd.volume?.vol_ratio_5_20||'-')},
-    {lbl:'52주',  score:safeNum(bd.position?.score), max:10,
+    {lbl:'거래량', score:safeNum(bd.volume?.score),  max:10,
+     detail: bd.volume?.vol_recovery ? '수축→회복' : bd.volume?.vol_squeeze ? '수축중' : bd.volume?.vol_surge ? '급증' : '-'},
+    {lbl:'52주',  score:safeNum(bd.position?.score), max:8,
      detail: bd.position?.week52_position != null ? safeNum(bd.position.week52_position).toFixed(1)+'%' : '-'},
-    {lbl:'외국인', score:safeNum(bd.frgn?.score),    max:10,
-     detail: bd.frgn?.dual_buy ? '🤝 외인+기관'
-       : bd.frgn?.frgn_net_negative ? '⚠️ 5일 순매도'
-       : bd.frgn?.frgn_5d != null
-         ? (bd.frgn.frgn_5d >= 0 ? '+' : '') + Math.round(bd.frgn.frgn_5d/10000) + '만주'
-         : '-'},
+    {lbl:'자금흐름', score:safeNum(bd.money_flow?.score), max:20,
+     detail: bd.money_flow?.money_surge
+       ? `💰대금${bd.money_flow.money_surge}(${bd.money_flow.amt_ratio_5_20}x)`
+       : bd.money_flow?.smart_money
+         ? `🧠스마트머니${bd.money_flow.smart_money}`
+         : bd.money_flow?.dual_buy ? '🤝외인+기관' : '-'},
     {lbl:'거래량↑', score:safeNum(bd.vol_rate?.score), max:5,
      detail: bd.vol_rate?.volume_rate ? '전일비 '+bd.vol_rate.volume_rate+'%' : bd.vol_rate?.note || '-'},
     {lbl:'주봉',   score:safeNum(bd.weekly_vcp?.score), max:5,
      detail: bd.weekly_vcp?.weekly_signal
        ? (bd.weekly_vcp.weekly_signal==='강함'?'📊 주봉 강함':bd.weekly_vcp.weekly_signal==='보통'?'📊 주봉 보통':'📊 주봉 약함')
        : bd.weekly_vcp?.skip ? '데이터 부족' : '-'},
+    {lbl:'캔들',  score:safeNum(bd.candle_signal?.score), max:25,
+     detail: bd.candle_signal?.accum_seq === '완성'
+       ? `🕯️매집완성(${bd.candle_signal.days_since_bigbull||''}일)`
+       : bd.candle_signal?.double_bottom ? '🔁쌍바닥돌파'
+       : bd.candle_signal?.three_white_soldiers ? '⬆️적삼병'
+       : bd.candle_signal?.cup_handle ? '☕컵앤핸들'
+       : bd.candle_signal?.accum_seq ? bd.candle_signal.accum_seq
+       : '-'},
   ];
 
   const rowsHtml = rows.map(r => `
