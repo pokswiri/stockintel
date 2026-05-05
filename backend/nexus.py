@@ -517,9 +517,9 @@ async def run_nexus(
         "sectors_searched": sector_keys,
         "market_open":      market_open,
         "grade_counts":     {
-            "HIGH": len(high_list),
-            "MID":  len(mid_list),
-            "LOW":  len(low_list),
+            "HIGH": len([s for s in scored if s["nexus"]["grade"] == "HIGH"]),
+            "MID":  len([s for s in scored if s["nexus"]["grade"] == "MID"]),
+            "LOW":  len([s for s in scored if s["nexus"]["grade"] == "LOW"]),
         },
         "top":    final_top,
         "all":    scored,
