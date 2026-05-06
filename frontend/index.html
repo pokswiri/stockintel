@@ -727,6 +727,25 @@ async function go(){
   }
 }
 
+async function deletePerfRecord(code, recDate) {
+  if (!confirm(`${code} (${recDate}) 추천 기록을 삭제할까요?`)) return;
+  try {
+    const res = await fetch(`${API}/performance/${code}?rec_date=${recDate}`, {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(8000)
+    });
+    const d = await res.json();
+    if (d.success) {
+      _perfLoaded = false;
+      loadPerf(true);
+    } else {
+      alert('삭제 실패: ' + (d.message || '알 수 없는 오류'));
+    }
+  } catch(e) {
+    alert('삭제 오류: ' + e.message);
+  }
+}
+
 let _perfLoaded = false;
 
 async function loadPerf(force=false) {
@@ -844,7 +863,10 @@ function renderPerf(d) {
       html += `<div class="perf-rec-item">
         <div class="perf-rec-top">
           <span class="perf-rec-name">${esc(r.name||r.code)}</span>
-          <span style="font-size:10px;font-weight:700;color:${gc}">${gl}</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:10px;font-weight:700;color:${gc}">${gl}</span>
+            <button onclick="deletePerfRecord('${esc(r.code)}','${(r.rec_date||'').slice(0,10)}')" style="font-size:10px;color:var(--txt3);background:none;border:1px solid var(--line2);border-radius:4px;padding:1px 5px;cursor:pointer;line-height:1.4">삭제</button>
+          </div>
         </div>
         <div class="perf-rec-meta">${esc(r.code)} · ${esc(r.sector||'—')} · ${date} · ${r.rec_price?r.rec_price.toLocaleString()+'원 추천':'가격 미기록'} · 점수 ${r.score||0}</div>
         <div class="perf-rec-rets">${retChips}</div>
