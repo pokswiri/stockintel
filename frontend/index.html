@@ -347,6 +347,14 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
             <span style="font-size:11px">장중 재분석 시 실시간 수급 데이터가 반영됩니다.</span>
           </div>
         </div>
+        <!-- 나머지 HIGH 종목 접기/펼치기 -->
+        <div id="nx-rest" style="display:none;margin-top:8px">
+          <button onclick="toggleRestHigh()" style="width:100%;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--txt2);font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between">
+            <span id="nx-rest-count">나머지 HIGH 보기</span>
+            <span id="nx-rest-arrow" style="font-size:10px;transition:transform .2s">▸</span>
+          </button>
+          <div id="nx-rest-cards" style="display:none;margin-top:6px"></div>
+        </div>
       </div>
       <div class="lbl">AI 추천 종목</div>
       <div class="card" id="kr-stk"></div>
@@ -564,9 +572,31 @@ function render(data){
       setTimeout(() => {
         nx.top.forEach(s => { try { drawCandles(s.code, s.nexus.candles); } catch(e){} });
       }, 100);
+
+      // 나머지 HIGH 종목 (top3 제외)
+      const topCodes = new Set(nx.top.map(s => s.code));
+      window._lastNexusAll = nx.all || [];
+      const restHigh = (nx.all || []).filter(s =>
+        s.nexus && s.nexus.grade === 'HIGH' && !topCodes.has(s.code)
+      ).sort((a, b) => b.nexus.total - a.nexus.total);
+
+      const restContainer = document.getElementById('nx-rest');
+      if (restHigh.length > 0) {
+        restContainer.style.display = 'block';
+        document.getElementById('nx-rest-count').textContent = `나머지 HIGH ${restHigh.length}개 더 보기`;
+        document.getElementById('nx-rest-cards').innerHTML = restHigh.map(s => {
+          try { return renderNexusCard(s); } catch(e) { return ''; }
+        }).join('');
+        // 접힌 상태로 시작
+        document.getElementById('nx-rest-cards').style.display = 'none';
+        document.getElementById('nx-rest-arrow').textContent = '▸';
+      } else {
+        restContainer.style.display = 'none';
+      }
     } else {
       document.getElementById('nx-cards').innerHTML = '';
       document.getElementById('nx-empty').style.display = 'block';
+      document.getElementById('nx-rest').style.display = 'none';
     }
   }
 
@@ -743,6 +773,26 @@ async function deletePerfRecord(code, recDate) {
     }
   } catch(e) {
     alert('삭제 오류: ' + e.message);
+  }
+}
+
+function toggleRestHigh() {
+  const cards = document.getElementById('nx-rest-cards');
+  const arrow = document.getElementById('nx-rest-arrow');
+  const isOpen = cards.style.display !== 'none';
+  cards.style.display = isOpen ? 'none' : 'block';
+  arrow.textContent = isOpen ? '▸' : '▾';
+  // 펼칠 때 캔들 그리기
+  if (!isOpen) {
+    setTimeout(() => {
+      cards.querySelectorAll('canvas[id]').forEach(c => {
+        const code = c.id.replace('cv-', '');
+        const s = (window._lastNexusAll || []).find(x => x.code === code);
+        if (s && s.nexus && s.nexus.candles) {
+          try { drawCandles(code, s.nexus.candles); } catch(e) {}
+        }
+      });
+    }, 50);
   }
 }
 
