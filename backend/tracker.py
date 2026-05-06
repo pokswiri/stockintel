@@ -93,6 +93,26 @@ def _save(data: dict):
         raise
 
 
+def delete_record(code: str, rec_date: str) -> bool:
+    """
+    특정 추천 기록 삭제
+    code + rec_date 조합으로 고유 식별 (같은 종목이 다른 날 여러 번 추천될 수 있음)
+    반환: True=삭제 성공, False=해당 기록 없음
+    """
+    data = _load()
+    before = len(data["records"])
+    data["records"] = [
+        r for r in data["records"]
+        if not (r.get("code") == code and r.get("rec_date", "")[:10] == rec_date[:10])
+    ]
+    after = len(data["records"])
+    if before > after:
+        _save(data)
+        print(f"[TRACKER] 삭제 완료: {code} ({rec_date[:10]})")
+        return True
+    return False
+
+
 def save_recommendations(nexus_top: list, analyzed_at: str = None):
     """
     NEXUS top 추천 종목 저장

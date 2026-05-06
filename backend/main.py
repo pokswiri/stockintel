@@ -11,13 +11,14 @@ from fastapi.responses import JSONResponse
 
 # 성과 추적 모듈
 try:
-    from tracker import save_recommendations, get_performance_stats, update_returns_async
+    from tracker import save_recommendations, get_performance_stats, update_returns_async, delete_record
     _TRACKER_LOADED = True
 except Exception:
     _TRACKER_LOADED = False
     def save_recommendations(*a, **kw): pass
     def get_performance_stats(): return {"total_count": 0, "records": [], "stats": {}}
     async def update_returns_async(*a, **kw): pass
+    def delete_record(*a, **kw): return False
 
 # KIS NEXUS Score 모듈 (키가 없으면 graceful 비활성화)
 try:
@@ -655,6 +656,13 @@ async def analyze(
         cached = _cache_get(cache_key)
         if cached:
             print(f"[CACHE] HIT — hours={hours} (30분 캐시)")
+            # 캐시 HIT여도 tracker 수익률 업데이트는 실행
+            if _TRACKER_LOADED and is_kis_available():
+                try:
+                    from kis_official import batch_fetch_prices as _bfp, fetch_daily_chart as _fdc
+                    await update_returns_async(_bfp, fetch_chart_fn=_fdc)
+                except Exception as e:
+                    print(f"[TRACKER] 캐시HIT 수익률 업데이트 오류: {e}")
             return {**cached, "cached": True}
 
     print(f"[ANALYZE] 시작 — hours={hours} force={force}")
@@ -839,6 +847,24 @@ def performance():
         return JSONResponse({"error": "tracker 모듈 비활성화"}, status_code=503)
     try:
         return get_performance_stats()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/performance/{code}")
+def performance_delete(code: str, rec_date: str = Query(..., description="삭제할 추천일 (YYYY-MM-DD)")):
+    """
+    특정 추천 기록 삭제
+    code: 종목코드 (예: 005930)
+    rec_date: 추천일 (예: 2026-05-05)
+    """
+    if not _TRACKER_LOADED:
+        return JSONResponse({"error": "tracker 모듈 비활성화"}, status_code=503)
+    try:
+        ok = delete_record(code, rec_date)
+        if ok:
+            return {"success": True, "message": f"{code} ({rec_date}) 삭제 완료"}
+        return JSONResponse({"success": False, "message": "해당 기록 없음"}, status_code=404)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
