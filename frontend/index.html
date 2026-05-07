@@ -374,6 +374,24 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
       </div>
     </div>
 
+    <!-- 개별 종목 NEXUS 점수 조회 -->
+    <div class="sec" id="s-score">
+      <div class="lbl">🔍 종목 점수 직접 조회</div>
+      <div class="card" style="padding:12px 14px">
+        <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">종목명 또는 코드를 입력하면 NEXUS 점수를 확인할 수 있습니다</div>
+        <div style="position:relative">
+          <input id="score-input" type="text" placeholder="예) 삼성전자, 원익IPS, 005930"
+            style="width:100%;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;color:var(--txt1);font-size:14px;outline:none;box-sizing:border-box"
+            oninput="onScoreInput(this.value)"
+            onkeydown="if(event.key==='Enter')doScore()"
+          >
+          <div id="score-suggest" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--line);border-radius:8px;margin-top:4px;z-index:100;overflow:hidden"></div>
+        </div>
+        <button onclick="doScore()" style="margin-top:8px;width:100%;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">점수 조회</button>
+        <div id="score-result" style="margin-top:10px"></div>
+      </div>
+    </div>
+
     <div class="disc">⚠ 본 분석은 AI가 뉴스를 수집·분석한 참고 정보입니다. 투자 권유가 아니며, 실제 투자 결정은 본인 판단과 전문가 상담을 통해 하시기 바랍니다.</div>
   </div>
 </div>
@@ -778,6 +796,136 @@ async function deletePerfRecord(code, recDate) {
     }
   } catch(e) {
     alert('삭제 오류: ' + e.message);
+  }
+}
+
+// ── 개별 종목 NEXUS 점수 조회 ─────────────────────────────────────
+let _scoreTimer = null;
+let _selectedCode = '';
+
+async function onScoreInput(val) {
+  clearTimeout(_scoreTimer);
+  _selectedCode = '';
+  const sug = document.getElementById('score-suggest');
+  if (!val.trim()) { sug.style.display = 'none'; return; }
+  _scoreTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`${API}/search?q=${encodeURIComponent(val.trim())}`,
+        { signal: AbortSignal.timeout(5000) });
+      const items = await res.json();
+      if (!items.length) { sug.style.display = 'none'; return; }
+      sug.innerHTML = items.map(it =>
+        `<div onclick="selectStock('${it.code}','${esc(it.name)}')"
+          style="padding:10px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line2)"
+          onmouseover="this.style.background='var(--bg3)'"
+          onmouseout="this.style.background=''">
+          <span style="color:var(--txt1);font-weight:600">${esc(it.name)}</span>
+          <span style="color:var(--txt3);font-size:11px;margin-left:6px">${it.code}</span>
+        </div>`
+      ).join('');
+      sug.style.display = 'block';
+    } catch(e) { sug.style.display = 'none'; }
+  }, 300);
+}
+
+function selectStock(code, name) {
+  _selectedCode = code;
+  document.getElementById('score-input').value = name;
+  document.getElementById('score-suggest').style.display = 'none';
+}
+
+async function doScore() {
+  document.getElementById('score-suggest').style.display = 'none';
+  const input = document.getElementById('score-input').value.trim();
+  if (!input) return;
+
+  // 코드 결정: 선택된 코드 or 6자리 숫자 직접 입력 or 검색 필요
+  let code = _selectedCode;
+  if (!code && /^\d{6}$/.test(input)) code = input;
+  if (!code) {
+    // 자동완성 미선택 시 검색 후 첫 번째 결과 사용
+    try {
+      const res = await fetch(`${API}/search?q=${encodeURIComponent(input)}`,
+        { signal: AbortSignal.timeout(5000) });
+      const items = await res.json();
+      if (!items.length) {
+        document.getElementById('score-result').innerHTML =
+          `<div style="color:var(--txt3);font-size:13px;text-align:center;padding:12px">종목을 찾을 수 없습니다. 코드(6자리)로 입력해보세요.</div>`;
+        return;
+      }
+      code = items[0].code;
+    } catch(e) { return; }
+  }
+
+  const resultEl = document.getElementById('score-result');
+  resultEl.innerHTML = `<div style="color:var(--txt3);font-size:13px;text-align:center;padding:16px">⏳ 분석 중... (3~5초 소요)</div>`;
+
+  try {
+    const res = await fetch(`${API}/score?code=${code}`,
+      { signal: AbortSignal.timeout(15000) });
+    const d = await res.json();
+    if (d.error) {
+      resultEl.innerHTML = `<div style="color:#f87171;font-size:13px;padding:8px">${esc(d.error)}</div>`;
+      return;
+    }
+    // 결과 카드 렌더링
+    const gradeColor = {HIGH:'#f87171', MID:'#fbbf24', LOW:'#9ca3af'};
+    const gradeLabel = {HIGH:'🔴 HIGH', MID:'🟡 MID', LOW:'⚪ LOW'};
+    const gc = gradeColor[d.grade] || '#9ca3af';
+    const gl = gradeLabel[d.grade] || d.grade;
+    const chgColor = d.change_rate >= 0 ? '#34d399' : '#f87171';
+    const chgStr = (d.change_rate >= 0 ? '+' : '') + d.change_rate.toFixed(2) + '%';
+
+    // breakdown 항목
+    const bd = d.breakdown || {};
+    const rows = [
+      {lbl:'VCP',    s:bd.vcp?.score||0,    max:25},
+      {lbl:'추세',   s:bd.stage2?.score||0,  max:20},
+      {lbl:'RSI',    s:bd.rsi?.score||0,     max:12},
+      {lbl:'거래량', s:bd.volume?.score||0,  max:10},
+      {lbl:'52주',   s:bd.position?.score||0,max:8},
+      {lbl:'자금',   s:bd.money_flow?.score||0,max:20},
+      {lbl:'캔들',   s:bd.candle_signal?.score||0,max:25},
+      {lbl:'거래↑',  s:bd.vol_rate?.score||0,max:5},
+    ];
+    const rowHtml = rows.map(r => {
+      const pct = r.max > 0 ? Math.round(r.s/r.max*100) : 0;
+      return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+        <span style="font-size:11px;color:var(--txt3);width:32px;flex-shrink:0">${r.lbl}</span>
+        <div style="flex:1;background:var(--bg3);border-radius:4px;height:6px;overflow:hidden">
+          <div style="width:${pct}%;background:${gc};height:100%;border-radius:4px;transition:width .3s"></div>
+        </div>
+        <span style="font-size:11px;color:var(--txt2);width:28px;text-align:right">${r.s}/${r.max}</span>
+      </div>`;
+    }).join('');
+
+    resultEl.innerHTML = `
+      <div class="card" style="margin-top:0;padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>
+            <div style="font-size:16px;font-weight:700;color:var(--txt1)">${esc(d.name)}</div>
+            <div style="font-size:11px;color:var(--txt3);margin-top:2px">${d.code} · ${d.price?.toLocaleString()}원 <span style="color:${chgColor}">${chgStr}</span></div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:22px;font-weight:800;color:${gc}">${d.total}</div>
+            <div style="font-size:11px;font-weight:700;color:${gc}">${gl}</div>
+          </div>
+        </div>
+        <div style="margin-bottom:6px">${rowHtml}</div>
+        <div style="font-size:10px;color:var(--txt3);text-align:right;margin-top:4px">
+          ${d.market_open ? '장중 실시간' : '장마감 기준'} · 섹터모멘텀 미적용
+        </div>
+      </div>`;
+
+    // 캔들 차트
+    if (d.candles && d.candles.length > 0) {
+      const cvId = `cv-score-${d.code}`;
+      resultEl.querySelector('.card').insertAdjacentHTML('beforeend',
+        `<canvas id="${cvId}" style="margin-top:8px;border-radius:8px"></canvas>`);
+      setTimeout(() => { try { drawCandles(cvId.replace('cv-',''), d.candles, cvId); } catch(e){} }, 50);
+    }
+  } catch(e) {
+    resultEl.innerHTML = `<div style="color:#f87171;font-size:13px;padding:8px">조회 실패: ${e.message}</div>`;
   }
 }
 
