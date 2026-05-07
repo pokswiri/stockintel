@@ -610,6 +610,11 @@ function renderNexusCard(s, isWatch=false) {
   const displayGrade = s.display_grade || grade;
   const gradeColor = displayGrade==='HIGH' ? 'var(--red)' : displayGrade==='MID' ? 'var(--amber)' : 'var(--txt3)';
   const gradeLabel = displayGrade==='HIGH' ? '🔴 HIGH' : displayGrade==='MID' ? '🟡 MID' : '⚪ 주목';
+  const warnCode = s.warn_code || '00';
+  const warnBadge = warnCode === '02' ? '<span style="font-size:10px;font-weight:700;color:#ff4444;background:rgba(255,68,68,0.15);padding:2px 6px;border-radius:4px;margin-left:4px">⚠️ 투경</span>'
+                  : warnCode === '03' ? '<span style="font-size:10px;font-weight:700;color:#ff4444;background:rgba(255,68,68,0.15);padding:2px 6px;border-radius:4px;margin-left:4px">⚠️ 위험</span>'
+                  : warnCode === '01' ? '<span style="font-size:10px;font-weight:700;color:#ffaa00;background:rgba(255,170,0,0.15);padding:2px 6px;border-radius:4px;margin-left:4px">⚡ 주의</span>'
+                  : '';
   const chgCls = s.change_rate > 0 ? 'up' : s.change_rate < 0 ? 'dn' : 'neut';
   const chgSign = s.change_rate > 0 ? '+' : '';
 
@@ -667,7 +672,7 @@ function renderNexusCard(s, isWatch=false) {
   <div class="nx-card ${displayGrade}">
     <div class="nx-top">
       <div class="nx-left">
-        <div class="nx-name">${esc(s.name)}</div>
+        <div class="nx-name">${esc(s.name)}${warnBadge}</div>
         <div class="nx-sub">
           <span class="nx-code">${esc(s.code)}</span>
           ${s.sector_key && s.sector_key !== '기타' && s.sector_key !== 'unknown' ? `<span class="nx-sector">${esc(s.sector_key)}</span>` : ''}
