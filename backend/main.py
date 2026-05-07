@@ -885,6 +885,146 @@ def health():
     }
 
 
+# ── 종목 검색 사전 (sector_stocks + 주요 대형주) ─────────────────────────
+def _build_stock_dict() -> dict:
+    """코드→이름 사전 구성"""
+    from sector_stocks import SECTOR_STOCKS
+    d = {}
+    for sk, stocks in SECTOR_STOCKS.items():
+        for s in stocks:
+            d[s["code"]] = s["name"]
+    # 주요 대형주 보완 (sector_stocks 미등록 종목)
+    extra = [
+        ("005930","삼성전자"),("000660","SK하이닉스"),("005380","현대차"),
+        ("035420","NAVER"),("035720","카카오"),("000270","기아"),
+        ("051910","LG화학"),("068270","셀트리온"),("105560","KB금융"),
+        ("055550","신한지주"),("086790","하나금융지주"),("138040","메리츠금융지주"),
+        ("032830","삼성생명"),("009830","한화솔루션"),("010950","S-Oil"),
+        ("012330","현대모비스"),("028260","삼성물산"),("096770","SK이노베이션"),
+        ("017670","SK텔레콤"),("030200","KT"),("032640","LG유플러스"),
+        ("066570","LG전자"),("003550","LG"),("034730","SK"),
+        ("011200","HMM"),("042660","한화오션"),("009540","HD현대중공업"),
+        ("003490","대한항공"),("248070","솔루엠"),("240810","원익IPS"),
+        ("095340","ISC"),("058470","리노공업"),("042700","한미반도체"),
+        ("036830","솔브레인홀딩스"),("006120","SK디스커버리"),
+    ]
+    for code, name in extra:
+        if code not in d:
+            d[code] = name
+    return d
+
+_STOCK_DICT: dict = {}
+
+
+@app.get("/search")
+def stock_search(q: str = Query(..., description="종목명 또는 코드")):
+    """종목명/코드 자동완성 — 최대 8개 반환"""
+    global _STOCK_DICT
+    if not _STOCK_DICT:
+        _STOCK_DICT = _build_stock_dict()
+
+    q = q.strip()
+    if not q:
+        return []
+
+    # 6자리 숫자 → 코드 직접 조회
+    if q.isdigit() and len(q) == 6:
+        name = _STOCK_DICT.get(q, "")
+        return [{"code": q, "name": name or q}]
+
+    # 종목명 부분 일치 검색
+    results = [
+        {"code": c, "name": n}
+        for c, n in _STOCK_DICT.items()
+        if q in n
+    ][:8]
+    return results
+
+
+@app.get("/score")
+async def score(code: str = Query(..., description="종목코드 6자리")):
+    """
+    개별 종목 NEXUS 점수 조회
+    기존 분석 파이프라인과 동일한 산식 적용
+    """
+    global _STOCK_DICT
+    if not _STOCK_DICT:
+        _STOCK_DICT = _build_stock_dict()
+
+    code = code.strip().zfill(6)
+
+    if not is_kis_available():
+        return JSONResponse({"error": "KIS API 미설정"}, status_code=503)
+
+    try:
+        from kis_official import fetch_daily_chart, batch_fetch_prices, fetch_investor_trend
+        from technical import calc_nexus_score
+        from datetime import datetime, time as dtime
+
+        # 병렬 조회
+        chart_task    = fetch_daily_chart(code)
+        price_task    = batch_fetch_prices([code])
+        inv_task      = fetch_investor_trend(code)
+
+        chart, price_map, inv_map = await asyncio.gather(
+            chart_task, price_task, inv_task,
+            return_exceptions=True
+        )
+
+        # 차트 데이터
+        if isinstance(chart, Exception) or not chart:
+            return JSONResponse({"error": "차트 데이터 조회 실패"}, status_code=404)
+
+        bars = chart.get("bars", [])
+        if len(bars) < 20:
+            return JSONResponse({"error": f"데이터 부족 ({len(bars)}일)"}, status_code=404)
+
+        # 현재가 데이터
+        pd_ = price_map.get(code, {}) if isinstance(price_map, dict) else {}
+        inv = inv_map if isinstance(inv_map, dict) else {}
+
+        # 종목명
+        name = pd_.get("name") or chart.get("name") or _STOCK_DICT.get(code, code)
+
+        # 52주 고저 / 시총
+        w52h = pd_.get("high_52w") or chart.get("week52_high", 0)
+        w52l = pd_.get("low_52w")  or chart.get("week52_low", 0)
+        mktcap = pd_.get("mktcap", 0)
+
+        stock_meta = {
+            "week52_high": w52h,
+            "week52_low":  w52l,
+            "mktcap":      mktcap,
+        }
+
+        # 장 중 여부
+        now = datetime.now()
+        market_open = (
+            dtime(9, 0) <= now.time() <= dtime(15, 30)
+            and now.weekday() < 5
+        )
+
+        # NEXUS 점수 계산 (기존 산식 그대로)
+        nexus = calc_nexus_score(bars, stock_meta, inv, pd_, market_open)
+
+        return {
+            "code":        code,
+            "name":        name,
+            "price":       pd_.get("price", bars[-1]["close"] if bars else 0),
+            "change_rate": pd_.get("change_rate", 0),
+            "mktcap":      mktcap,
+            "total":       nexus["total"],
+            "grade":       nexus["grade"],
+            "breakdown":   nexus["breakdown"],
+            "candles":     nexus.get("candles", []),
+            "market_open": market_open,
+        }
+
+    except Exception as e:
+        import traceback
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()[:300]}, status_code=500)
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "service": "StockIntel", "version": "4.1"}
