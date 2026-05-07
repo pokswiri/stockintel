@@ -381,6 +381,7 @@ async def run_nexus(
                 "inst_today":   meta.get("inst_qty", 0),
                 "nexus":        nexus,
                 "has_investor": bool(inv),
+                "warn_code":    pd_.get("warn_code", "00"),  # 00:정상 01:주의 02:경고 03:위험
             })
         except Exception as e:
             import traceback
@@ -470,7 +471,12 @@ async def run_nexus(
                 return len(quota_sectors)
 
         # ── 1단계: 전체 HIGH, AI섹터 우선 + 섹터별 최대 허용량 적용 ─
-        all_highs = [s for s in scored_all if s["nexus"]["grade"] == "HIGH"]
+        # 투자경고(02)/투자위험(03) 종목은 top3 제외 (뱃지는 all에서 표시)
+        all_highs = [
+            s for s in scored_all
+            if s["nexus"]["grade"] == "HIGH"
+            and s.get("warn_code", "00") not in ("02", "03")
+        ]
         all_highs.sort(key=lambda s: (sector_priority(s), -s["nexus"]["total"]))
 
         cur: dict = {}
@@ -511,9 +517,12 @@ async def run_nexus(
                 sk = s.get("sector_key", "기타")
                 c2[sk] = c2.get(sk, 0) + 1
 
-            all_mids = [s for s in scored_all
-                        if s["nexus"]["grade"] == "MID"
-                        and s["code"] not in used_codes]
+            all_mids = [
+                s for s in scored_all
+                if s["nexus"]["grade"] == "MID"
+                and s["code"] not in used_codes
+                and s.get("warn_code", "00") not in ("02", "03")
+            ]
             # 점수 내림차순 우선, 동점 시 AI 섹터 순서
             all_mids.sort(key=lambda s: (-s["nexus"]["total"], sector_priority(s)))
 

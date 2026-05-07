@@ -115,6 +115,7 @@ async def fetch_current_price(code: str) -> dict:
                 "new_high_low": o.get("new_hgpr_lwpr_cls_code", ""),     # 신고가/신저가 코드
                 "halt": o.get("temp_stop_yn", "N") == "Y",
                 "overbought": o.get("ovtm_vi_cls_code", "") != "",
+                "warn_code": o.get("mrkt_warn_cls_code", "00"),  # 00:정상 01:주의 02:경고 03:위험
                 "name": o.get("hts_kor_isnm", ""),
             }
     except Exception:
