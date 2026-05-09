@@ -433,6 +433,8 @@ function tab(id,b){
   document.querySelectorAll('.tb').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');
   if (id === 'rotation') {
+    // 기존 탭 모두 숨기기
+    document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));
     loadRotation();
     return;
   }
