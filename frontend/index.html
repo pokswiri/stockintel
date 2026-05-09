@@ -321,6 +321,7 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
       <button class="tb" onclick="tab('risk',this)">⚠️ 리스크</button>
       <button class="tb" onclick="tab('perf',this);loadPerf()">📈 성과</button>
       <button class="tb" onclick="tab('score',this)">🔍 종목조회</button>
+      <button class="tb" onclick="tab('rotation',this);loadRotation()">🔄 순환매</button>
     </div>
 
     <div class="sec on" id="s-issues">
@@ -397,6 +398,22 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
   </div>
 </div>
 
+<!-- 순환매 탭 -->
+<div id="rotation-panel" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg1);overflow-y:auto;z-index:200">
+  <div style="max-width:480px;margin:0 auto;padding:0 0 80px">
+    <div style="position:sticky;top:0;background:rgba(8,12,20,.95);backdrop-filter:blur(12px);padding:14px 16px 10px;border-bottom:1px solid var(--line);z-index:10">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:16px;font-weight:700">🔄 순환매 섹터</div>
+        <button onclick="closeRotation()" style="background:none;border:none;color:var(--txt3);font-size:20px;cursor:pointer">✕</button>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:4px" id="rot-subtitle">데이터 로딩 중...</div>
+    </div>
+    <div id="rot-content" style="padding:12px 14px">
+      <div class="card" style="text-align:center;padding:24px;color:var(--txt3);font-size:13px">불러오는 중...</div>
+    </div>
+  </div>
+</div>
+
 <script>
 const API="https://stockintel-production.up.railway.app";
 let hours=24,timer=null;
@@ -412,7 +429,20 @@ const cc=c=>({person_statement:"#A855F7",economic_indicator:"#3B82F6",geopolitic
 const cl=c=>({person_statement:"인물발언",economic_indicator:"경제지표",geopolitics:"지정학",commodity:"원자재",corporate:"기업이슈",market:"시장동향",person_or_event:"인물발언",economy:"경제",finance:"금융",technology:"기술",politics:"정치",us_market:"미국시장",kr_market:"국내시장"})[c]||"기타";
 
 function setH(h,b){hours=h;document.querySelectorAll('.rb').forEach(x=>x.classList.remove('on'));b.classList.add('on')}
-function tab(id,b){document.querySelectorAll('.tb').forEach(x=>x.classList.remove('on'));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));b.classList.add('on');document.getElementById('s-'+id).classList.add('on')}
+function tab(id,b){
+  document.querySelectorAll('.tb').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  if (id === 'rotation') {
+    loadRotation();
+    return;
+  }
+  document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));
+  const el = document.getElementById('s-'+id);
+  if (el) el.classList.add('on');
+  // 순환매 패널 닫기
+  const rp = document.getElementById('rotation-panel');
+  if (rp) rp.style.display = 'none';
+}
 
 const STEPS=["뉴스 수집 중","AI 분석 중","종목 추천 생성"];
 let si=0;
@@ -928,6 +958,169 @@ async function doScore() {
   } catch(e) {
     resultEl.innerHTML = `<div style="color:#f87171;font-size:13px;padding:8px">조회 실패: ${e.message}</div>`;
   }
+}
+
+// ── 순환매 섹터 탭 ────────────────────────────────────────────────
+let _rotLoaded = false;
+
+function loadRotation(force=false) {
+  if (_rotLoaded && !force) return;
+  document.getElementById('rotation-panel').style.display = 'block';
+  document.getElementById('rot-content').innerHTML =
+    '<div class="card" style="text-align:center;padding:24px;color:var(--txt3);font-size:13px">⏳ 섹터 데이터 로딩 중...</div>';
+  fetch(`${API}/rotation?days=10`, { signal: AbortSignal.timeout(15000) })
+    .then(r => r.json())
+    .then(renderRotation)
+    .catch(e => {
+      document.getElementById('rot-content').innerHTML =
+        `<div class="card" style="color:#f87171;padding:16px;font-size:13px">로드 실패: ${e.message}</div>`;
+    });
+}
+
+function closeRotation() {
+  document.getElementById('rotation-panel').style.display = 'none';
+}
+
+const SECTOR_KR = {
+  semiconductor:'반도체 대형', semiconductor_parts:'반도체 장비·부품',
+  glass_substrate:'유리기판·PCB', ai_software:'AI·플랫폼·SW',
+  it_hardware:'IT하드웨어', defense:'방산', space:'우주·항공',
+  robot:'로봇·자동화', shipbuilding:'조선·해운',
+  battery:'2차전지', electric_infra:'전력·AI인프라',
+  nuclear:'원전', renewable:'신재생에너지', auto_ev:'자동차·EV',
+  telecom:'5G·6G통신', steel:'철강·비철', chemical:'화학·소재',
+  oil_gas:'정유·가스', construction:'건설', logistics:'물류·운송',
+  healthcare:'바이오·제약', content:'엔터·게임', consumer:'유통·소비재',
+  bank:'은행·금융지주', securities:'증권·보험',
+};
+
+const GROUP_KR = { A:'글로벌 성장', B:'방어·정책', C:'에너지 전환', D:'경기민감', E:'내수·방어' };
+const GROUP_COLOR = { A:'#60a5fa', B:'#f87171', C:'#34d399', D:'#fbbf24', E:'#a78bfa' };
+
+function renderRotation(d) {
+  _rotLoaded = true;
+
+  if (!d.available) {
+    document.getElementById('rot-subtitle').textContent = '데이터 없음';
+    document.getElementById('rot-content').innerHTML = `
+      <div class="card" style="padding:20px;text-align:center">
+        <div style="font-size:14px;color:var(--txt2);margin-bottom:8px">📊 데이터 수집 중</div>
+        <div style="font-size:12px;color:var(--txt3)">${d.message || '장 마감 후 분석 실행 시 자동 수집됩니다'}</div>
+        <div style="font-size:11px;color:var(--txt3);margin-top:8px">수동 기록: <code>/rotation/record</code></div>
+      </div>`;
+    return;
+  }
+
+  document.getElementById('rot-subtitle').textContent =
+    `${d.date} 기준 · ${d.data_days}일치 데이터 · 신뢰도 ${d.reliability}`;
+
+  let html = '';
+
+  // ① 매집 경보 (비주목 섹터 중 매집 감지)
+  if (d.accum_alert && d.accum_alert.length > 0) {
+    html += `<div class="lbl" style="margin:0 0 8px">🔔 매집 감지 — 다음 순환매 후보</div>`;
+    for (const a of d.accum_alert) {
+      const gc = GROUP_COLOR[a.group] || '#9ca3af';
+      const pct = Math.round(a.accum_score / 30 * 100);
+      html += `<div class="card" style="margin-bottom:8px;padding:12px 14px;border-left:3px solid ${gc}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div>
+            <span style="font-size:14px;font-weight:700;color:var(--txt1)">${SECTOR_KR[a.sector]||a.sector}</span>
+            <span style="font-size:10px;color:${gc};font-weight:600;margin-left:6px">그룹 ${a.group} ${GROUP_KR[a.group]||''}</span>
+          </div>
+          <div style="font-size:18px;font-weight:800;color:${gc}">${a.accum_score}<span style="font-size:10px;color:var(--txt3)">/30</span></div>
+        </div>
+        <div style="background:var(--bg3);border-radius:4px;height:5px;margin-bottom:8px">
+          <div style="width:${pct}%;background:${gc};height:100%;border-radius:4px"></div>
+        </div>
+        <div style="font-size:11px;color:var(--txt3)">${a.reason}</div>
+        ${a.frgn_consec >= 2 ? `<div style="font-size:10px;color:#34d399;margin-top:4px">👁 외국인 ${a.frgn_consec}일 연속 순매수</div>` : ''}
+        ${a.bottom_consec >= 3 ? `<div style="font-size:10px;color:#fbbf24;margin-top:2px">💤 ${a.bottom_consec}일 연속 하위권 — 역발상 주목</div>` : ''}
+      </div>`;
+    }
+  } else {
+    html += `<div class="card" style="padding:12px;text-align:center;color:var(--txt3);font-size:12px;margin-bottom:12px">
+      오늘은 뚜렷한 매집 감지 섹터 없음
+    </div>`;
+  }
+
+  // ② 순환매 예측
+  if (d.predict && d.predict.length > 0) {
+    html += `<div class="lbl" style="margin:12px 0 8px">🎯 내일 주목 섹터 예측</div>`;
+    for (const p of d.predict) {
+      const gc = GROUP_COLOR[p.group] || '#9ca3af';
+      const conf = p.confidence;
+      const confColor = conf >= 70 ? '#34d399' : conf >= 50 ? '#fbbf24' : '#9ca3af';
+      html += `<div class="card" style="margin-bottom:8px;padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-size:14px;font-weight:700">${SECTOR_KR[p.sector]||p.sector}</span>
+            <span style="font-size:10px;color:${gc};margin-left:6px">그룹 ${p.group}</span>
+          </div>
+          <span style="font-size:13px;font-weight:700;color:${confColor}">${conf}%</span>
+        </div>
+        <div style="font-size:11px;color:var(--txt3);margin-top:4px">${p.rule}</div>
+        ${p.signals.length > 0 ? `<div style="font-size:10px;color:var(--txt3);margin-top:3px">시그널: ${p.signals.join(' · ')}</div>` : ''}
+      </div>`;
+    }
+  }
+
+  // ③ 그룹별 오늘 현황
+  html += `<div class="lbl" style="margin:12px 0 8px">📊 그룹별 오늘 현황</div>`;
+  html += `<div class="card" style="padding:10px 14px;margin-bottom:12px">`;
+  for (const [g, gs] of Object.entries(d.group_summary||{})) {
+    const gc = GROUP_COLOR[g] || '#9ca3af';
+    const chgColor = gs.avg_chg >= 0 ? '#34d399' : '#f87171';
+    const chgStr = (gs.avg_chg >= 0 ? '+' : '') + gs.avg_chg.toFixed(2) + '%';
+    html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line2)">
+      <div>
+        <span style="font-size:11px;font-weight:700;color:${gc}">그룹 ${g}</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:6px">${GROUP_KR[g]||''}</span>
+      </div>
+      <div style="text-align:right">
+        <span style="font-size:12px;font-weight:600;color:${chgColor}">${chgStr}</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:6px">${SECTOR_KR[gs.best_sector]||gs.best_sector}</span>
+      </div>
+    </div>`;
+  }
+  html += `</div>`;
+
+  // ④ 전체 섹터 순위표 (접기/펼치기)
+  html += `<button onclick="toggleSectorRank()" style="width:100%;padding:10px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--txt2);font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <span>📋 전체 섹터 순위 (25개)</span>
+    <span id="rot-rank-arrow">▸</span>
+  </button>
+  <div id="rot-rank-list" style="display:none">`;
+
+  // today 섹터를 rank 순으로 정렬
+  const todayArr = Object.entries(d.today||{})
+    .map(([sk,sv]) => ({sk, ...sv}))
+    .sort((a,b) => a.rank - b.rank);
+
+  for (const sv of todayArr) {
+    const chg = sv.etf_chg || sv.avg_chg || 0;
+    const chgColor = chg >= 0 ? '#34d399' : '#f87171';
+    const chgStr = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    const accum = sv.accum_score || 0;
+    const isAI = sv.is_ai_sector;
+    html += `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line2)">
+      <span style="font-size:11px;color:var(--txt3);width:20px;text-align:right">${sv.rank}</span>
+      <span style="font-size:12px;color:var(--txt1);flex:1">${SECTOR_KR[sv.sk]||sv.sk}${isAI ? ' <span style="font-size:9px;color:#60a5fa">AI선정</span>' : ''}</span>
+      <span style="font-size:12px;font-weight:600;color:${chgColor};width:52px;text-align:right">${chgStr}</span>
+      ${accum >= 6 ? `<span style="font-size:9px;background:rgba(52,211,153,.15);color:#34d399;padding:1px 5px;border-radius:4px">매집${accum}</span>` : '<span style="width:36px"></span>'}
+    </div>`;
+  }
+  html += `</div>`;
+
+  document.getElementById('rot-content').innerHTML = html;
+}
+
+function toggleSectorRank() {
+  const el = document.getElementById('rot-rank-list');
+  const arrow = document.getElementById('rot-rank-arrow');
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'block';
+  arrow.textContent = isOpen ? '▸' : '▾';
 }
 
 function toggleRestHigh() {
