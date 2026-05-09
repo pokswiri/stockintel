@@ -115,7 +115,21 @@ async def fetch_current_price(code: str) -> dict:
                 "new_high_low": o.get("new_hgpr_lwpr_cls_code", ""),     # 신고가/신저가 코드
                 "halt": o.get("temp_stop_yn", "N") == "Y",
                 "overbought": o.get("ovtm_vi_cls_code", "") != "",
-                "warn_code": o.get("mrkt_warn_cls_code", "00"),  # 00:정상 01:주의 02:경고 03:위험
+                # 투자경고 코드 (KIS API 필드 우선순위)
+                # mrkt_warn_cls_code: 00=정상 01=주의 02=경고 03=위험
+                # invt_caful_yn: Y=투자주의
+                # iscd_stat_cls_code: 55=정상, 기타값=관리종목 등
+                "warn_code": (
+                    o.get("mrkt_warn_cls_code", "").strip()
+                    or ("01" if o.get("invt_caful_yn", "N") == "Y" else "")
+                    or "00"
+                ),
+                "iscd_stat": o.get("iscd_stat_cls_code", ""),
+                "_warn_debug": {  # 디버그용 (추후 제거)
+                    "mrkt_warn": o.get("mrkt_warn_cls_code", "MISSING"),
+                    "invt_caful": o.get("invt_caful_yn", "MISSING"),
+                    "iscd_stat": o.get("iscd_stat_cls_code", "MISSING"),
+                },
                 "name": o.get("hts_kor_isnm", ""),
             }
     except Exception:
@@ -354,17 +368,41 @@ INDEX_CODES = {
     "kospi200": ("U", "2001"), # 코스피200
 }
 
-# 섹터 업종코드 (코스피 업종)
+# 섹터 업종코드 (KIS inquire-index-price / FHPUP02100000)
 SECTOR_INDEX_CODES = {
-    "semiconductor": ("U", "0011"),   # 전기전자
-    "defense":       ("U", "0021"),   # 운수장비(방산 포함)
-    "healthcare":    ("U", "0027"),   # 의약품
-    "finance":       ("U", "0024"),   # 금융업
-    "steel":         ("U", "0007"),   # 철강금속
-    "battery":       ("U", "0011"),   # 전기전자 (배터리 포함)
-    "auto_ev":       ("U", "0021"),   # 운수장비
-    "renewable":     ("U", "0014"),   # 비금속광물 → 신재생 근접
-    "ai_platform":   ("U", "0011"),   # 전기전자
+    # 그룹 A — 글로벌 성장
+    "semiconductor":       ("U", "0013"),  # 전기전자
+    "semiconductor_parts": ("U", "0013"),
+    "glass_substrate":     ("U", "0013"),
+    "ai_software":         ("U", "0025"),  # 서비스업
+    "it_hardware":         ("U", "0013"),
+    # 그룹 B — 방어·정책
+    "defense":             ("U", "0015"),  # 운수장비
+    "space":               ("U", "0012"),  # 기계
+    "robot":               ("U", "0012"),
+    "shipbuilding":        ("U", "0015"),
+    # 그룹 C — 에너지 전환
+    "battery":             ("U", "0008"),  # 화학
+    "electric_infra":      ("U", "0013"),  # 전기전자
+    "nuclear":             ("U", "0017"),  # 전기가스업
+    "renewable":           ("U", "0017"),
+    "auto_ev":             ("U", "0015"),  # 운수장비
+    "telecom":             ("U", "0020"),  # 통신업
+    # 그룹 D — 경기민감
+    "steel":               ("U", "0011"),  # 철강금속
+    "chemical":            ("U", "0008"),  # 화학
+    "oil_gas":             ("U", "0008"),
+    "construction":        ("U", "0018"),  # 건설업
+    "logistics":           ("U", "0019"),  # 운수창고
+    # 그룹 E — 내수·방어
+    "healthcare":          ("U", "0009"),  # 의약품
+    "content":             ("U", "0025"),  # 서비스업
+    "consumer":            ("U", "0016"),  # 유통업
+    "bank":                ("U", "0022"),  # 은행
+    "securities":          ("U", "0023"),  # 증권
+    # 구버전 호환
+    "finance":             ("U", "0021"),
+    "ai_platform":         ("U", "0013"),
 }
 
 
@@ -483,15 +521,39 @@ async def fetch_etf_price(code: str, name: str) -> dict:
 
 # 섹터별 대표 ETF 코드
 SECTOR_ETF_CODES = {
-    "semiconductor": ("091160", "KODEX 반도체"),
-    "defense":       ("443810", "TIGER 방산"),
-    "healthcare":    ("143860", "KODEX 바이오"),
-    "battery":       ("305720", "KODEX 2차전지산업"),
-    "auto_ev":       ("261060", "KODEX 자동차"),
-    "finance":       ("091170", "KODEX 은행"),
-    "renewable":     ("278540", "KODEX 글로벌클린에너지"),
-    "ai_platform":   ("364980", "TIGER Fn인터넷"),
-    "steel":         ("NONE",   ""),
+    # 그룹 A
+    "semiconductor":       ("091160", "KODEX 반도체"),
+    "semiconductor_parts": ("091160", "KODEX 반도체"),
+    "glass_substrate":     ("091160", "KODEX 반도체"),
+    "ai_software":         ("364980", "TIGER Fn인터넷"),
+    "it_hardware":         ("091160", "KODEX 반도체"),
+    # 그룹 B
+    "defense":             ("443810", "TIGER 방산"),
+    "space":               ("443810", "TIGER 방산"),
+    "robot":               ("472860", "TIGER 로보틱스"),
+    "shipbuilding":        ("466940", "TIGER 조선TOP10"),
+    # 그룹 C
+    "battery":             ("305720", "KODEX 2차전지산업"),
+    "electric_infra":      ("396500", "TIGER 전력기기"),
+    "nuclear":             ("446970", "KODEX 원자력"),
+    "renewable":           ("278540", "KODEX 글로벌클린에너지"),
+    "auto_ev":             ("261060", "KODEX 자동차"),
+    "telecom":             ("NONE",   ""),
+    # 그룹 D
+    "steel":               ("NONE",   ""),
+    "chemical":            ("NONE",   ""),
+    "oil_gas":             ("117460", "KODEX 에너지화학"),
+    "construction":        ("NONE",   ""),
+    "logistics":           ("NONE",   ""),
+    # 그룹 E
+    "healthcare":          ("143860", "KODEX 바이오"),
+    "content":             ("228810", "TIGER 200IT"),
+    "consumer":            ("NONE",   ""),
+    "bank":                ("091170", "KODEX 은행"),
+    "securities":          ("102970", "KODEX 증권"),
+    # 구버전 호환
+    "finance":             ("091170", "KODEX 은행"),
+    "ai_platform":         ("364980", "TIGER Fn인터넷"),
 }
 
 
@@ -513,21 +575,44 @@ async def fetch_sector_etfs(sector_keys: list) -> dict:
 
 # ── 업종별 외국인/기관 순매수 종목 실시간 조회 ─────────────────────────
 
-# 섹터 → KIS 업종코드 매핑
+# 섹터 → KIS 업종코드 매핑 (FHPTJ04400000 후보 조회용)
 SECTOR_TO_UPJONG = {
-    "semiconductor": ["0011"],          # 전기전자 (반도체 포함)
-    "defense":       ["0021", "0017"],  # 운수장비 + 기계 (방산 분산)
-    "healthcare":    ["0027", "0028"],  # 의약품 + 의료정밀
-    "finance":       ["0024", "0023"],  # 금융업 + 증권
-    "battery":       ["0010"],          # 화학 (배터리소재 중심, 전기전자와 분리)
-    "auto_ev":       ["0021"],          # 운수장비
-    "renewable":     ["0007", "0014"],  # 철강금속 + 비금속 (신재생 분산)
-    "ai_platform":   ["0011"],          # 전기전자 (IT플랫폼)
-    "steel":         ["0007"],          # 철강금속
-    "shipbuilding":  ["0021", "0009"],  # 운수장비 + 운수창고 (조선·해운)
-    # 전체 시장 (섹터 미결정 시)
-    "all_kospi":     ["0001"],          # 코스피 전체
-    "all_kosdaq":    ["1001"],          # 코스닥 전체
+    # 그룹 A
+    "semiconductor":       ["0013"],
+    "semiconductor_parts": ["0013"],
+    "glass_substrate":     ["0013"],
+    "ai_software":         ["0025"],
+    "it_hardware":         ["0013"],
+    # 그룹 B
+    "defense":             ["0015", "0012"],
+    "space":               ["0012", "0015"],
+    "robot":               ["0012"],
+    "shipbuilding":        ["0015", "0019"],
+    # 그룹 C
+    "battery":             ["0008", "0013"],
+    "electric_infra":      ["0013", "0017"],
+    "nuclear":             ["0017", "0012"],
+    "renewable":           ["0017"],
+    "auto_ev":             ["0015"],
+    "telecom":             ["0020"],
+    # 그룹 D
+    "steel":               ["0011"],
+    "chemical":            ["0008"],
+    "oil_gas":             ["0008", "0017"],
+    "construction":        ["0018"],
+    "logistics":           ["0019"],
+    # 그룹 E
+    "healthcare":          ["0009", "0014"],
+    "content":             ["0025"],
+    "consumer":            ["0016", "0005"],
+    "bank":                ["0021", "0022"],
+    "securities":          ["0023", "0024"],
+    # 구버전 호환
+    "finance":             ["0021", "0022", "0023"],
+    "ai_platform":         ["0013", "0025"],
+    # 전체 시장
+    "all_kospi":           ["0001"],
+    "all_kosdaq":          ["1001"],
 }
 
 
