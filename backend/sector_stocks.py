@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-sector_stocks.py v5.1
-25개 섹터 최종 재구성
-v5 대비 변경: SK증권 코드 수정(018670→001510), SK가스 oil_gas 추가,
-electric_infra/glass_substrate/oil_gas/it_hardware/logistics 보강
+sector_stocks.py v5.3
+전종목 코드 검증 완료 + robot 섹터 ETF 기반 재구성
+변경: 336570(원텍→제거), 009540 이름수정, 현대오토에버 307950, 파두 440110
+robot: 현대오토에버·뉴로메카·유진로봇·현대무벡스·원익홀딩스 추가
 총 293개 유니크 종목
 """
 
@@ -37,6 +37,7 @@ SECTOR_STOCKS = {
         {"code": "029080", "name": "하이비젼시스템", "cap": "mid"},
         {"code": "024900", "name": "덕산하이메탈", "cap": "mid"},
         {"code": "045510", "name": "에이피티씨", "cap": "mid"},
+        {"code": "440110", "name": "파두", "cap": "mid"},
     ],
 
     # 반도체 장비·부품·소켓 | 그룹A
@@ -73,17 +74,17 @@ SECTOR_STOCKS = {
         {"code": "112290", "name": "와이씨켐", "cap": "mid"},
     ],
 
-    # ETF: TIGER Fn인터넷(364980) | 그룹A
+    # ETF: TIGER Fn인터넷 | AI·플랫폼·SW | 그룹A
     "ai_software": [
         {"code": "035420", "name": "NAVER", "cap": "large"},
         {"code": "035720", "name": "카카오", "cap": "large"},
         {"code": "377300", "name": "카카오페이", "cap": "mid"},
         {"code": "111940", "name": "더존비즈온", "cap": "mid"},
         {"code": "053800", "name": "안랩", "cap": "mid"},
-        {"code": "048410", "name": "현대오토에버", "cap": "mid"},
         {"code": "304100", "name": "솔트룩스", "cap": "mid"},
         {"code": "060900", "name": "대아티아이", "cap": "mid"},
         {"code": "089880", "name": "케이엘넷", "cap": "mid"},
+        {"code": "307950", "name": "현대오토에버", "cap": "mid"},
     ],
 
     # IT하드웨어·가전·디스플레이 | 그룹A
@@ -95,7 +96,7 @@ SECTOR_STOCKS = {
         {"code": "006400", "name": "삼성SDI", "cap": "large"},
     ],
 
-    # ETF: TIGER 방산(443810) | 그룹B
+    # ETF: TIGER K방산&우주(463250) | 그룹B
     "defense": [
         {"code": "012450", "name": "한화에어로스페이스", "cap": "large"},
         {"code": "047810", "name": "한국항공우주", "cap": "large"},
@@ -122,26 +123,25 @@ SECTOR_STOCKS = {
         {"code": "272210", "name": "한화시스템", "cap": "large"},
     ],
 
-    # 협동로봇·산업자동화·AI로봇 | 그룹B
+    # ETF: TIGER 코리아휴머노이드로봇산업(0148J0) | 그룹B
     "robot": [
-        {"code": "336570", "name": "원익로보틱스", "cap": "mid"},
-        {"code": "017800", "name": "현대엘리베이터", "cap": "mid"},
-        {"code": "196490", "name": "로보쓰리", "cap": "mid"},
-        {"code": "110020", "name": "전진중공업", "cap": "mid"},
-        {"code": "042670", "name": "HD현대인프라코어", "cap": "large"},
         {"code": "005380", "name": "현대차", "cap": "large"},
         {"code": "277810", "name": "레인보우로보틱스", "cap": "mid"},
         {"code": "108490", "name": "로보티즈", "cap": "mid"},
         {"code": "090355", "name": "로보스타", "cap": "mid"},
-        {"code": "215100", "name": "에스에프에이", "cap": "mid"},
         {"code": "277070", "name": "글로벌세아", "cap": "mid"},
         {"code": "454910", "name": "두산로보틱스", "cap": "mid"},
-        {"code": "058610", "name": "SPG", "cap": "mid"},
+        {"code": "058610", "name": "에스피지", "cap": "mid"},
+        {"code": "307950", "name": "현대오토에버", "cap": "mid"},
+        {"code": "348340", "name": "뉴로메카", "cap": "mid"},
+        {"code": "056080", "name": "유진로봇", "cap": "mid"},
+        {"code": "319400", "name": "현대무벡스", "cap": "mid"},
+        {"code": "030530", "name": "원익홀딩스", "cap": "mid"},
     ],
 
-    # ETF: TIGER 조선TOP10(466940) | 그룹B
+    # ETF: TIGER 조선TOP10(494670) | 그룹B
     "shipbuilding": [
-        {"code": "009540", "name": "HD현대중공업", "cap": "large"},
+        {"code": "009540", "name": "HD한국조선해양", "cap": "large"},
         {"code": "042660", "name": "한화오션", "cap": "large"},
         {"code": "010140", "name": "삼성중공업", "cap": "large"},
         {"code": "267250", "name": "HD현대", "cap": "large"},
@@ -187,7 +187,7 @@ SECTOR_STOCKS = {
         {"code": "062040", "name": "산일전기", "cap": "mid"},
     ],
 
-    # ETF: KODEX 원자력(446970) | 그룹C (건설사 중복허용)
+    # ETF: KODEX K원자력SMR | TIGER 코리아원자력 | 그룹C
     "nuclear": [
         {"code": "034020", "name": "두산에너빌리티", "cap": "large"},
         {"code": "015760", "name": "한국전력", "cap": "large"},
@@ -206,6 +206,7 @@ SECTOR_STOCKS = {
         {"code": "006360", "name": "GS건설", "cap": "large"},
         {"code": "000210", "name": "DL이앤씨", "cap": "large"},
         {"code": "047040", "name": "대우건설", "cap": "large"},
+        {"code": "028260", "name": "삼성물산", "cap": "large"},
     ],
 
     # ETF: KODEX 글로벌클린에너지(278540) | 그룹C
