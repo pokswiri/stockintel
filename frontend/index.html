@@ -1057,8 +1057,13 @@ async function loadSectorScores(sectors, containerId, btnId) {
   if (!btn || !box) return;
 
   const cacheKey = sectors.join(',');
+
+  // 캐시 있으면 즉시 표시 + 버튼 재활성화 (재조회 가능)
   if (_scoreCache[cacheKey]) {
+    box.style.display = 'block';
     renderSectorScores(box, _scoreCache[cacheKey]);
+    btn.disabled = false;
+    btn.textContent = '🔄 다시 조회';
     return;
   }
 
@@ -1073,7 +1078,8 @@ async function loadSectorScores(sectors, containerId, btnId) {
     if (data.error) throw new Error(data.error);
     _scoreCache[cacheKey] = data;
     renderSectorScores(box, data);
-    btn.textContent = '✓ 점수 조회됨';
+    btn.disabled = false;
+    btn.textContent = '🔄 다시 조회';
   } catch(e) {
     box.innerHTML = `<div style="font-size:12px;color:#f87171;padding:8px 0">조회 실패: ${e.message}</div>`;
     btn.disabled = false;
@@ -1112,40 +1118,34 @@ function renderRotation(d) {
 
   let html = '';
 
-  // ══ ① 예측 섹터 — 개편된 직관적 카드 ══════════════════════════
-  const hasPredicts = d.predict && d.predict.length > 0;
-  const hasAccum    = d.accum_alert && d.accum_alert.length > 0;
-
-  // 예측+매집 통합 후보 목록 (점수 기준)
+  // ══ ① 내일 주목 예측 섹터 ══════════════════════════════════════
   const candidates = [];
-  if (hasPredicts) for (const p of d.predict)    candidates.push({...p, type:'predict'});
-  if (hasAccum)    for (const a of d.accum_alert) candidates.push({...a, type:'accum', confidence: Math.round(a.accum_score/30*100)});
+  if (d.predict)     for (const p of d.predict)    candidates.push({...p, type:'predict'});
+  if (d.accum_alert) for (const a of d.accum_alert) candidates.push({...a, type:'accum', confidence: Math.round((a.accum_score||0)/30*100)});
   candidates.sort((a,b) => (b.confidence||0)-(a.confidence||0));
 
-  if (candidates.length > 0) {
-    html += `<div class="lbl" style="margin:0 0 10px">🎯 다음 순환매 주목 섹터</div>`;
+  html += `<div style="background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:12px;padding:10px 14px;margin-bottom:12px">
+    <div style="font-size:12px;font-weight:700;color:#34d399;margin-bottom:3px">🎯 내일 주목 예측 섹터</div>
+    <div style="font-size:10px;color:var(--txt3)">매집 감지 · 순환매 로테이션 분석 기반 — 아직 오르지 않은 섹터 중 다음 차례 예측</div>
+  </div>`;
 
-    // 점수 조회용 섹터 코드 모음
+  if (candidates.length > 0) {
     const topSectors = candidates.slice(0,3).map(c=>c.sector);
-    const btnId  = `rot-score-btn-${++_rotBtnCounter}`;
-    const boxId  = `rot-score-box-${_rotBtnCounter}`;
+    const btnId = `rot-score-btn-${++_rotBtnCounter}`;
+    const boxId = `rot-score-box-${_rotBtnCounter}`;
 
     for (const c of candidates.slice(0,5)) {
-      const gc   = GROUP_COLOR[c.group]||'#9ca3af';
-      const lbl  = confLabel(c.confidence||0);
+      const gc  = GROUP_COLOR[c.group]||'#9ca3af';
+      const lbl = confLabel(c.confidence||0);
       const conf = c.confidence||0;
-      const confBar = Math.min(100, conf);
-
       let detailHtml = '';
-      if (c.type === 'predict') {
+      if (c.type==='predict') {
         detailHtml = `<div style="font-size:11px;color:var(--txt3);margin-top:4px">${c.rule||''}</div>`;
       } else {
-        detailHtml = `
-          <div style="font-size:11px;color:var(--txt3);margin-top:4px">${c.reason||''}</div>
+        detailHtml = `<div style="font-size:11px;color:var(--txt3);margin-top:4px">${c.reason||''}</div>
           ${(c.frgn_consec||0)>=2?`<div style="font-size:10px;color:#34d399;margin-top:3px">👁 외국인 ${c.frgn_consec}일 연속 순매수</div>`:''}
           ${(c.bottom_consec||0)>=3?`<div style="font-size:10px;color:#fbbf24;margin-top:2px">💤 ${c.bottom_consec}일 비주목 → 역발상</div>`:''}`;
       }
-
       html += `<div class="card" style="margin-bottom:8px;padding:12px 14px;border-left:3px solid ${gc}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
           <div style="display:flex;align-items:center;gap:8px">
@@ -1157,78 +1157,59 @@ function renderRotation(d) {
           </div>
           <div style="text-align:right">
             <div style="font-size:13px;font-weight:800;color:${lbl.color}">${lbl.text}</div>
-            <div style="font-size:11px;color:var(--txt3)">${conf}%</div>
+            <div style="font-size:11px;color:var(--txt3)">신뢰도 ${conf}%</div>
           </div>
         </div>
         <div style="background:var(--bg3);border-radius:3px;height:4px;margin-bottom:8px">
-          <div style="width:${confBar}%;background:${gc};height:100%;border-radius:3px"></div>
+          <div style="width:${Math.min(100,conf)}%;background:${gc};height:100%;border-radius:3px"></div>
         </div>
         ${detailHtml}
         ${(c.signals||[]).length>0?`<div style="font-size:11px;margin-top:5px">${sigIcons(c.signals)} <span style="color:var(--txt3)">${(c.signals||[]).join(' · ')}</span></div>`:''}
       </div>`;
     }
 
-    // 대장주 점수 조회 버튼
     html += `<button id="${btnId}" onclick="loadSectorScores(${JSON.stringify(topSectors)},'${boxId}','${btnId}')"
       style="width:100%;padding:11px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);
       border-radius:10px;color:#a5b4fc;font-size:13px;font-weight:600;cursor:pointer;margin:4px 0 8px">
-      🔍 상위 섹터 대장주 NEXUS 점수 조회
+      🔍 예측 섹터 대장주 NEXUS 점수 조회
     </button>
-    <div id="${boxId}" style="display:none;background:var(--bg2);border-radius:10px;padding:10px 14px;margin-bottom:12px"></div>`;
+    <div id="${boxId}" style="display:none;background:var(--bg2);border-radius:10px;padding:10px 14px;margin-bottom:4px"></div>`;
   } else {
     html += `<div class="card" style="padding:14px;text-align:center;color:var(--txt3);font-size:12px;margin-bottom:12px">
-      데이터 7일 이상 누적 시 예측 활성화됩니다
+      데이터 7일 이상 누적 시 예측 활성화
     </div>`;
   }
 
-  // ══ ② 그룹별 오늘 현황 ══════════════════════════════════════════
-  html += `<div class="lbl" style="margin:12px 0 8px">📊 그룹별 현황</div>
-  <div class="card" style="padding:10px 14px;margin-bottom:12px">`;
+  // ══ ② 오늘 섹터 성과 순위 ══════════════════════════════════════
+  html += `<div style="background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:12px;padding:10px 14px;margin:12px 0 10px">
+    <div style="font-size:12px;font-weight:700;color:#60a5fa;margin-bottom:3px">📊 오늘 섹터 성과 순위</div>
+    <div style="font-size:10px;color:var(--txt3)">오늘 하루 등락률 기준 — 이미 오른 섹터 파악 (예측과 반대 개념, 참고용)</div>
+  </div>`;
+
+  // 그룹별 현황
+  html += `<div class="card" style="padding:10px 14px;margin-bottom:10px">`;
   for (const [g, gs] of Object.entries(d.group_summary||{})) {
     const gc = GROUP_COLOR[g]||'#9ca3af';
     const chg = gs.avg_chg||0;
     const chgCol = chg>=0?'#34d399':'#f87171';
     const chgStr = (chg>=0?'+':'')+chg.toFixed(2)+'%';
     html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line2)">
-      <div>
-        <span style="font-size:11px;font-weight:700;color:${gc}">그룹 ${g}</span>
-        <span style="font-size:10px;color:var(--txt3);margin-left:6px">${GROUP_KR[g]||''}</span>
-      </div>
-      <div>
-        <span style="font-size:12px;font-weight:600;color:${chgCol}">${chgStr}</span>
-        <span style="font-size:10px;color:var(--txt3);margin-left:6px">${SECTOR_KR[gs.best_sector]||gs.best_sector}</span>
-      </div>
+      <div><span style="font-size:11px;font-weight:700;color:${gc}">그룹 ${g}</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:6px">${GROUP_KR[g]||''}</span></div>
+      <div><span style="font-size:12px;font-weight:600;color:${chgCol}">${chgStr}</span>
+        <span style="font-size:10px;color:var(--txt3);margin-left:6px">${SECTOR_KR[gs.best_sector]||gs.best_sector}</span></div>
     </div>`;
   }
   html += `</div>`;
 
-  // ══ ③ 섹터별 직접 대장주 점수 조회 ══════════════════════════════
-  html += `<div class="lbl" style="margin:12px 0 8px">🔎 섹터별 대장주 점수 직접 조회</div>
-  <div class="card" style="padding:10px 14px;margin-bottom:12px">
-    <div style="font-size:11px;color:var(--txt3);margin-bottom:10px">섹터 선택 후 조회</div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px" id="rot-sec-select">`;
-
-  for (const [sk, kr] of Object.entries(SECTOR_KR)) {
-    html += `<button onclick="toggleSecSel('${sk}',this)"
-      style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--bg3);
-      border:1px solid var(--line);color:var(--txt3);cursor:pointer">${kr}</button>`;
-  }
-  const selBtnId = `rot-sel-btn-${++_rotBtnCounter}`;
-  const selBoxId = `rot-sel-box-${_rotBtnCounter}`;
-  html += `</div>
-    <button id="${selBtnId}" onclick="querySelectedSectors('${selBtnId}','${selBoxId}')"
-      style="width:100%;padding:9px;background:var(--bg3);border:1px solid var(--line);
-      border-radius:8px;color:var(--txt2);font-size:12px;cursor:pointer;font-weight:600">
-      선택 섹터 대장주 조회 →
-    </button>
-    <div id="${selBoxId}" style="display:none;margin-top:10px"></div>
-  </div>`;
-
-  // ══ ④ 전체 섹터 순위표 ══════════════════════════════════════════
+  // 전체 25개 순위
   html += `<button onclick="toggleSectorRank()" style="width:100%;padding:10px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--txt2);font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-    <span>📋 전체 섹터 순위 (25개)</span><span id="rot-rank-arrow">▸</span>
+    <span>📋 오늘 전체 섹터 등락률 (25개 펼치기)</span><span id="rot-rank-arrow">▸</span>
   </button>
-  <div id="rot-rank-list" style="display:none">`;
+  <div id="rot-rank-list" style="display:none;background:var(--bg2);border-radius:10px;padding:8px 14px;margin-bottom:12px">
+    <div style="font-size:10px;color:#60a5fa;padding:4px 0 8px;border-bottom:1px solid var(--line2)">
+      💡 1위 = 오늘 가장 많이 오른 섹터 &nbsp;|&nbsp; 25위 = 오늘 안 오른 섹터 (예측 후보)</div>`;
+
   const todayArr = Object.entries(d.today||{}).map(([sk,sv])=>({sk,...sv})).sort((a,b)=>a.rank-b.rank);
   for (const sv of todayArr) {
     const chg = sv.etf_chg||sv.avg_chg||0;
@@ -1245,11 +1226,41 @@ function renderRotation(d) {
   }
   html += `</div>`;
 
+  // ══ ③ 원하는 섹터 직접 점수 조회 ══════════════════════════════
+  html += `<div class="lbl" style="margin:12px 0 8px">🔎 원하는 섹터 직접 점수 조회</div>
+  <div class="card" style="padding:10px 14px;margin-bottom:12px">
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:10px">섹터 선택 (최대 5개) → 대장주 NEXUS 점수 조회 · 초기화 후 다른 섹터 재조회 가능</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px" id="rot-sec-select">`;
+
+  for (const [sk, kr] of Object.entries(SECTOR_KR)) {
+    html += `<button onclick="toggleSecSel('${sk}',this)"
+      style="font-size:11px;padding:4px 8px;border-radius:6px;background:var(--bg3);
+      border:1px solid var(--line);color:var(--txt3);cursor:pointer">${kr}</button>`;
+  }
+  const selBtnId = `rot-sel-btn-${++_rotBtnCounter}`;
+  const selBoxId = `rot-sel-box-${_rotBtnCounter}`;
+  html += `</div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button id="${selBtnId}" onclick="querySelectedSectors('${selBtnId}','${selBoxId}')"
+        style="flex:1;padding:9px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);
+        border-radius:8px;color:#a5b4fc;font-size:12px;cursor:pointer;font-weight:600">
+        🔍 선택 섹터 조회
+      </button>
+      <button onclick="clearSecSel()"
+        style="padding:9px 12px;background:var(--bg3);border:1px solid var(--line);
+        border-radius:8px;color:var(--txt3);font-size:12px;cursor:pointer">
+        초기화
+      </button>
+    </div>
+    <div id="${selBoxId}" style="display:none;margin-top:8px"></div>
+  </div>`;
+
   document.getElementById('rot-content').innerHTML = html;
 }
 
 // 섹터 선택 토글
 const _selectedSectors = new Set();
+
 function toggleSecSel(sk, btn) {
   if (_selectedSectors.has(sk)) {
     _selectedSectors.delete(sk);
@@ -1264,8 +1275,21 @@ function toggleSecSel(sk, btn) {
     btn.style.borderColor = '#6366f1';
   }
 }
+
+function clearSecSel() {
+  _selectedSectors.clear();
+  document.querySelectorAll('#rot-sec-select button').forEach(btn => {
+    btn.style.background = 'var(--bg3)';
+    btn.style.color = 'var(--txt3)';
+    btn.style.borderColor = 'var(--line)';
+  });
+}
+
 async function querySelectedSectors(btnId, boxId) {
   if (_selectedSectors.size === 0) { alert('섹터를 선택하세요'); return; }
+  // 매번 새로 조회 (캐시 무효화)
+  const cacheKey = [..._selectedSectors].join(',');
+  delete _scoreCache[cacheKey];
   await loadSectorScores([..._selectedSectors], boxId, btnId);
 }
 
