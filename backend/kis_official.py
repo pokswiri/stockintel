@@ -519,6 +519,45 @@ async def fetch_etf_price(code: str, name: str) -> dict:
         return {}
 
 
+async def fetch_etf_compositions(etf_code: str) -> list:
+    """
+    ETF PDF 구성종목 조회 (TR: FHPST02400000)
+    반환: [{"code": "005930", "name": "삼성전자", "weight": 28.5}, ...]
+    """
+    token = await get_token()
+    if not token:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                BASE_URL + "/uapi/domestic-stock/v1/quotations/inquire-etf-component",
+                headers=_headers(token, "FHPST02400000"),
+                params={"fid_input_iscd": etf_code},
+            )
+            r.raise_for_status()
+            body = r.json()
+            outputs = body.get("output2", body.get("output1", []))
+            if not isinstance(outputs, list):
+                outputs = [outputs] if outputs else []
+
+            results = []
+            for item in outputs:
+                code = item.get("mksc_shrn_iscd", "").strip()
+                name = item.get("hts_kor_isnm", "").strip()
+                try:
+                    weight = float(str(item.get("etpr_erng_rt", 0)).replace(",",""))
+                except:
+                    weight = 0.0
+                if code and len(code) == 6:
+                    results.append({"code": code, "name": name, "weight": weight})
+            results.sort(key=lambda x: x["weight"], reverse=True)
+            print(f"[ETF] {etf_code} 구성종목 {len(results)}개 조회")
+            return results
+    except Exception as e:
+        print(f"[ETF] {etf_code} 구성종목 조회 실패: {e}")
+        return []
+
+
 # 섹터별 대표 ETF 코드
 SECTOR_ETF_CODES = {
     # 그룹 A

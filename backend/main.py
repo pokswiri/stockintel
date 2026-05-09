@@ -902,6 +902,26 @@ async def rotation_record_manual():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/etf/compositions/{etf_code}")
+async def etf_compositions(etf_code: str):
+    """
+    ETF 구성종목 조회 (KIS FHPST02400000)
+    etf_code: ETF 종목코드 6자리 (예: 487240)
+    """
+    if not is_kis_available():
+        return JSONResponse({"error": "KIS API 미설정"}, status_code=503)
+    try:
+        from kis_official import fetch_etf_compositions
+        stocks = await fetch_etf_compositions(etf_code)
+        return {
+            "etf_code": etf_code,
+            "count":    len(stocks),
+            "stocks":   stocks,
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/performance")
 def performance():
     """
