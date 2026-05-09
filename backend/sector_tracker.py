@@ -625,3 +625,55 @@ def get_sector_trend(sector_key: str, days: int = 14) -> list:
         }
         for r in records
     ]
+
+
+# ── 섹터 대장주 선별 ──────────────────────────────────────────────────
+
+def get_sector_leaders(sector_key: str, max_n: int = 4) -> list:
+    """
+    섹터 대장주 선별 — large 우선, 부족하면 mid로 채움
+    반환: [{"code": "010120", "name": "LS일렉트릭", "cap": "large"}, ...]
+    """
+    from sector_stocks import SECTOR_STOCKS
+    stocks = SECTOR_STOCKS.get(sector_key, [])
+    # 의도적 중복 종목(defense+space 등) 처리: 이미 중복 없으므로 그대로
+    large = [s for s in stocks if s.get("cap") == "large"]
+    mid   = [s for s in stocks if s.get("cap") == "mid"]
+    return (large + mid)[:max_n]
+
+
+def get_predict_sectors(days: int = 10) -> dict:
+    """
+    순환매 예측 + 섹터별 대장주 코드 목록 반환
+    rotation_status를 호출하지 않고 내부에서 직접 계산 (순환 import 방지)
+    """
+    status = get_rotation_status(days)
+    result = {
+        "available":   status.get("available", False),
+        "data_days":   status.get("data_days", 0),
+        "reliability": status.get("reliability", "낮음"),
+        "predict":     [],
+        "accum_alert": [],
+    }
+    if not status.get("available"):
+        return result
+
+    # 예측 섹터 + 대장주
+    for p in status.get("predict", []):
+        sk = p["sector"]
+        leaders = get_sector_leaders(sk, 4)
+        result["predict"].append({
+            **p,
+            "leaders": leaders,
+        })
+
+    # 매집 경보 섹터 + 대장주
+    for a in status.get("accum_alert", []):
+        sk = a["sector"]
+        leaders = get_sector_leaders(sk, 4)
+        result["accum_alert"].append({
+            **a,
+            "leaders": leaders,
+        })
+
+    return result

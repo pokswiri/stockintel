@@ -21,7 +21,7 @@ except Exception:
     def delete_record(*a, **kw): return False
 
 try:
-    from sector_tracker import record_daily_sectors, get_rotation_status, get_sector_trend
+    from sector_tracker import record_daily_sectors, get_rotation_status, get_sector_trend, get_sector_leaders, get_predict_sectors
     _SECTOR_TRACKER_LOADED = True
 except Exception:
     _SECTOR_TRACKER_LOADED = False
@@ -1110,6 +1110,139 @@ async def score(code: str = Query(..., description="종목코드 6자리")):
     except Exception as e:
         import traceback
         return JSONResponse({"error": str(e), "trace": traceback.format_exc()[:300]}, status_code=500)
+
+
+@app.get("/rotation/sector-scores")
+async def rotation_sector_scores(sectors: str = Query(..., description="섹터키 콤마 구분 (예: electric_infra,nuclear,robot)")):
+    """
+    순환매 예측 섹터 대장주 NEXUS 점수 일괄 조회
+    - 섹터별 large 우선 최대 4종목 병렬 조회
+    - 기존 /score 와 동일한 산식 적용
+    """
+    if not is_kis_available():
+        return JSONResponse({"error": "KIS API 미설정"}, status_code=503)
+    if not _SECTOR_TRACKER_LOADED:
+        return JSONResponse({"error": "sector_tracker 비활성화"}, status_code=503)
+
+    sector_list = [s.strip() for s in sectors.split(",") if s.strip()][:5]  # 최대 5섹터
+
+    try:
+        from kis_official import fetch_daily_chart, batch_fetch_prices, fetch_investor_trend
+        from technical import calc_nexus_score
+        from datetime import datetime, time as dtime
+
+        global _STOCK_DICT
+        if not _STOCK_DICT:
+            _STOCK_DICT = _build_stock_dict()
+
+        now = datetime.now()
+        market_open = (
+            dtime(9, 0) <= now.time() <= dtime(15, 30)
+            and now.weekday() < 5
+        )
+
+        # 섹터별 대장주 수집
+        sector_leaders = {}
+        all_codes = []
+        for sk in sector_list:
+            leaders = get_sector_leaders(sk, 4)
+            sector_leaders[sk] = leaders
+            all_codes += [s["code"] for s in leaders]
+        all_codes = list(dict.fromkeys(all_codes))  # 중복 제거
+
+        if not all_codes:
+            return JSONResponse({"error": "유효한 섹터 없음"}, status_code=400)
+
+        # 현재가 일괄 조회
+        price_map = await batch_fetch_prices(all_codes)
+
+        # 차트+수급 병렬 조회
+        async def fetch_score(code: str) -> dict:
+            try:
+                chart_t = fetch_daily_chart(code)
+                inv_t   = fetch_investor_trend(code)
+                chart, inv = await asyncio.gather(chart_t, inv_t, return_exceptions=True)
+
+                if isinstance(chart, Exception) or not chart:
+                    return {"code": code, "error": "차트 조회 실패"}
+                bars = chart.get("bars", [])
+                if len(bars) < 20:
+                    return {"code": code, "error": f"데이터 부족({len(bars)}일)"}
+
+                pd_  = price_map.get(code, {}) if isinstance(price_map, dict) else {}
+                inv_ = inv if isinstance(inv, dict) else {}
+                name = pd_.get("name") or chart.get("name") or _STOCK_DICT.get(code, code)
+
+                stock_meta = {
+                    "week52_high": pd_.get("high_52w") or chart.get("week52_high", 0),
+                    "week52_low":  pd_.get("low_52w")  or chart.get("week52_low", 0),
+                    "mktcap":      pd_.get("mktcap", 0),
+                }
+                nexus = calc_nexus_score(bars, stock_meta, inv_, pd_, market_open)
+                return {
+                    "code":        code,
+                    "name":        name,
+                    "price":       pd_.get("price", bars[-1]["close"] if bars else 0),
+                    "change_rate": pd_.get("change_rate", 0),
+                    "mktcap":      stock_meta["mktcap"],
+                    "total":       nexus["total"],
+                    "grade":       nexus["grade"],
+                    "breakdown":   nexus["breakdown"],
+                    "candles":     nexus.get("candles", []),
+                }
+            except Exception as e:
+                return {"code": code, "error": str(e)[:80]}
+
+        # 전체 병렬 조회
+        tasks = [fetch_score(c) for c in all_codes]
+        results = await asyncio.gather(*tasks)
+        score_map = {r["code"]: r for r in results}
+
+        # 섹터별로 묶어서 반환
+        SECTOR_KR = {
+            "semiconductor":"반도체 대형","semiconductor_parts":"반도체 장비·부품",
+            "glass_substrate":"유리기판·PCB","ai_software":"AI·플랫폼·SW",
+            "it_hardware":"IT하드웨어","defense":"방산","space":"우주·항공",
+            "robot":"로봇·자동화","shipbuilding":"조선·해운","battery":"2차전지",
+            "electric_infra":"전력·AI인프라","nuclear":"원전","renewable":"신재생에너지",
+            "auto_ev":"자동차·EV","telecom":"5G·6G통신","steel":"철강·비철",
+            "chemical":"화학·소재","oil_gas":"정유·가스","construction":"건설",
+            "logistics":"물류·운송","healthcare":"바이오·제약","content":"엔터·게임",
+            "consumer":"유통·소비재","bank":"은행·금융지주","securities":"증권·보험",
+        }
+        output = {}
+        for sk in sector_list:
+            leaders = sector_leaders.get(sk, [])
+            stocks_scored = []
+            for ldr in leaders:
+                sc = score_map.get(ldr["code"], {})
+                stocks_scored.append({
+                    "code":        ldr["code"],
+                    "name":        sc.get("name", ldr["name"]),
+                    "cap":         ldr["cap"],
+                    "price":       sc.get("price", 0),
+                    "change_rate": sc.get("change_rate", 0),
+                    "total":       sc.get("total"),
+                    "grade":       sc.get("grade"),
+                    "breakdown":   sc.get("breakdown", {}),
+                    "candles":     sc.get("candles", []),
+                    "error":       sc.get("error"),
+                })
+            stocks_scored.sort(key=lambda x: x.get("total") or 0, reverse=True)
+            output[sk] = {
+                "sector_kr": SECTOR_KR.get(sk, sk),
+                "stocks":    stocks_scored,
+            }
+
+        return {
+            "market_open": market_open,
+            "sectors":     output,
+            "note":        "섹터 모멘텀 보너스 미적용 — 종목 고유 NEXUS 점수 기준",
+        }
+
+    except Exception as e:
+        import traceback
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()[:400]}, status_code=500)
 
 
 @app.get("/")
