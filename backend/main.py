@@ -20,6 +20,15 @@ except Exception:
     async def update_returns_async(*a, **kw): pass
     def delete_record(*a, **kw): return False
 
+try:
+    from sector_tracker import record_daily_sectors, get_rotation_status, get_sector_trend
+    _SECTOR_TRACKER_LOADED = True
+except Exception:
+    _SECTOR_TRACKER_LOADED = False
+    async def record_daily_sectors(*a, **kw): return {}
+    def get_rotation_status(*a, **kw): return {"available": False, "message": "sector_tracker 비활성화"}
+    def get_sector_trend(*a, **kw): return []
+
 # KIS NEXUS Score 모듈 (키가 없으면 graceful 비활성화)
 try:
     from nexus import run_nexus
@@ -806,6 +815,19 @@ async def analyze(
         except Exception as e:
             print(f"[TRACKER] 오류: {e}")
 
+    # 순환매 섹터 트래킹 — 장 마감 후 분석 시 자동 기록
+    if _SECTOR_TRACKER_LOADED and not nexus_result.get("market_open", True):
+        try:
+            ai_sectors = nexus_result.get("sectors_searched", [])
+            kospi_chg  = krx_indices.get("kospi", {}).get("chg_pct", 0)
+            top3_names = [s["name"] for s in nexus_result.get("top", [])]
+            asyncio.create_task(
+                record_daily_sectors(ai_sectors, kospi_chg, top3_names)
+            )
+            print(f"[SECTOR_TRACKER] 기록 태스크 시작 — 섹터={ai_sectors}")
+        except Exception as e:
+            print(f"[SECTOR_TRACKER] 트리거 오류: {e}")
+
     result = {
         "analyzed_at": analyzed_at,
         "hours": hours,
@@ -833,6 +855,51 @@ async def analyze(
         print(f"[CACHE] STORED — hours={hours}")
 
     return result
+
+
+@app.get("/rotation")
+def rotation(days: int = Query(default=10, ge=1, le=90)):
+    """
+    순환매 섹터 현황 + 매집 감지 + 예측
+    - 최근 N일 섹터 성과 트렌드
+    - 비주목 섹터 매집 경보 (accum_alert)
+    - 내일 주목 섹터 예측 (데이터 7일 이상 시)
+    """
+    if not _SECTOR_TRACKER_LOADED:
+        return JSONResponse({"error": "sector_tracker 비활성화"}, status_code=503)
+    try:
+        return get_rotation_status(days)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/rotation/sector/{sector_key}")
+def rotation_sector(sector_key: str, days: int = Query(default=14, ge=1, le=90)):
+    """특정 섹터의 N일 트렌드 조회"""
+    if not _SECTOR_TRACKER_LOADED:
+        return JSONResponse({"error": "sector_tracker 비활성화"}, status_code=503)
+    try:
+        return {
+            "sector": sector_key,
+            "days":   days,
+            "trend":  get_sector_trend(sector_key, days),
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/rotation/record")
+async def rotation_record_manual():
+    """수동으로 오늘 섹터 성과 기록 (테스트/강제 실행용)"""
+    if not _SECTOR_TRACKER_LOADED:
+        return JSONResponse({"error": "sector_tracker 비활성화"}, status_code=503)
+    if not is_kis_available():
+        return JSONResponse({"error": "KIS API 미설정"}, status_code=503)
+    try:
+        record = await record_daily_sectors([], 0.0, [])
+        return {"success": True, "date": record.get("date"), "sectors": len(record.get("sectors", {}))}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/performance")
