@@ -28,7 +28,7 @@ from kis_official import (
     batch_fetch_investors, is_kis_available,
 )
 from technical import calc_nexus_score
-from sector_stocks import get_sector_stocks, SECTOR_STOCKS, SECTOR_MAP
+from sector_stocks import SECTOR_STOCKS, SECTOR_MAP
 
 # fetch_sector_candidates는 최신 kis_official에만 있음 — 안전하게 임포트
 try:
@@ -381,8 +381,14 @@ async def run_nexus(
                 "inst_today":   meta.get("inst_qty", 0),
                 "nexus":        nexus,
                 "has_investor": bool(inv),
-                "warn_code":    pd_.get("warn_code", "00"),  # 00:정상 01:주의 02:경고 03:위험
+                "warn_code":    pd_.get("warn_code", "00"),
+                "iscd_stat":    pd_.get("iscd_stat", ""),
             })
+            # 투자경고 디버그 로그
+            warn = pd_.get("warn_code", "00")
+            warn_dbg = pd_.get("_warn_debug", {})
+            if warn_dbg or warn not in ("00", ""):
+                print(f"[WARN_DEBUG] {code} warn_code={warn} debug={warn_dbg}")
         except Exception as e:
             import traceback
             err_detail = traceback.format_exc()
