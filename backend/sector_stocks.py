@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-sector_stocks.py v5.3
-전종목 코드 검증 완료 + robot 섹터 ETF 기반 재구성
-변경: 336570(원텍→제거), 009540 이름수정, 현대오토에버 307950, 파두 440110
-robot: 현대오토에버·뉴로메카·유진로봇·현대무벡스·원익홀딩스 추가
-총 293개 유니크 종목
+sector_stocks.py v5.4
+ETF 기반 + 전수조사 + Q1~Q11 + 34개 신규 추가 최종 반영
+총 329개 유니크 종목
+의도적 중복 12개 포함 총 341개 항목
 """
 
 SECTOR_MAP = {'반도체': 'semiconductor', 'semiconductor': 'semiconductor', 'hbm': 'semiconductor', '반도체부품': 'semiconductor_parts', '반도체장비': 'semiconductor_parts', 'semiconductor_parts': 'semiconductor_parts', '유리기판': 'glass_substrate', 'pcb': 'glass_substrate', 'glass_substrate': 'glass_substrate', 'ai플랫폼': 'ai_software', 'ai_platform': 'ai_software', 'ai_software': 'ai_software', 'it': 'ai_software', '플랫폼': 'ai_software', 'ai': 'ai_software', 'it하드웨어': 'it_hardware', 'it_hardware': 'it_hardware', '가전': 'it_hardware', '로봇': 'robot', 'robot': 'robot', '자동화': 'robot', '우주': 'space', 'space': 'space', '항공우주': 'space', '방산': 'defense', 'defense': 'defense', '방위': 'defense', '조선': 'shipbuilding', 'shipbuilding': 'shipbuilding', '해운': 'shipbuilding', '배터리': 'battery', 'battery': 'battery', '이차전지': 'battery', '2차전지': 'battery', '전력': 'electric_infra', 'electric_infra': 'electric_infra', '전력기기': 'electric_infra', '전선': 'electric_infra', 'ai인프라': 'electric_infra', '원전': 'nuclear', 'nuclear': 'nuclear', '원자력': 'nuclear', '신재생': 'renewable', 'renewable': 'renewable', '태양광': 'renewable', '수소': 'renewable', '자동차': 'auto_ev', 'auto_ev': 'auto_ev', '전기차': 'auto_ev', '통신': 'telecom', 'telecom': 'telecom', '5g': 'telecom', '6g': 'telecom', '철강': 'steel', 'steel': 'steel', '비철금속': 'steel', '화학': 'chemical', 'chemical': 'chemical', '소재': 'chemical', '정유': 'oil_gas', 'oil_gas': 'oil_gas', '에너지': 'oil_gas', '가스': 'oil_gas', '건설': 'construction', 'construction': 'construction', '물류': 'logistics', 'logistics': 'logistics', '운송': 'logistics', '바이오': 'healthcare', '헬스케어': 'healthcare', 'healthcare': 'healthcare', '제약': 'healthcare', '의약': 'healthcare', '엔터': 'content', 'content': 'content', '게임': 'content', '소비재': 'consumer', 'consumer': 'consumer', '유통': 'consumer', '은행': 'bank', 'bank': 'bank', '금융': 'bank', 'finance': 'bank', '증권': 'securities', '보험': 'securities', 'securities': 'securities'}
 
 SECTOR_STOCKS = {
 
-    # ETF: KODEX 반도체(091160) | 그룹A
+    # ETF: KODEX 반도체(091160) | 그룹A 글로벌 성장
     "semiconductor": [
         {"code": "005930", "name": "삼성전자", "cap": "large"},
         {"code": "000660", "name": "SK하이닉스", "cap": "large"},
@@ -55,14 +54,25 @@ SECTOR_STOCKS = {
         {"code": "095500", "name": "미래컴퍼니", "cap": "mid"},
         {"code": "094360", "name": "칩스앤미디어", "cap": "mid"},
         {"code": "107640", "name": "한중엔시에스", "cap": "mid"},
-        {"code": "178320", "name": "서진시스템", "cap": "mid"},
         {"code": "015260", "name": "인터플렉스", "cap": "mid"},
         {"code": "094170", "name": "동운아나텍", "cap": "mid"},
         {"code": "294090", "name": "이오테크닉스", "cap": "mid"},
         {"code": "025560", "name": "미래산업", "cap": "mid"},
+        {"code": "011930", "name": "신성이엔지", "cap": "mid"},
+        {"code": "195870", "name": "해성디에스", "cap": "mid"},
+        {"code": "355150", "name": "코스텍시스", "cap": "mid"},
+        {"code": "053610", "name": "프로텍", "cap": "mid"},
+        {"code": "095610", "name": "테스", "cap": "mid"},
+        {"code": "083450", "name": "GST", "cap": "mid"},
+        {"code": "183190", "name": "코미코", "cap": "mid"},
+        {"code": "064760", "name": "티씨케이", "cap": "mid"},
+        {"code": "031980", "name": "피에스케이홀딩스", "cap": "mid"},
+        {"code": "031810", "name": "피에스케이", "cap": "mid"},
+        {"code": "101170", "name": "우림피티에스", "cap": "mid"},
+        {"code": "122990", "name": "두산테스나", "cap": "mid"},
     ],
 
-    # 유리기판·PCB·레이저장비·소재 | 그룹A
+    # 유리기판·PCB·장비·소재 | 그룹A
     "glass_substrate": [
         {"code": "008060", "name": "대덕전자", "cap": "mid"},
         {"code": "044780", "name": "코리아써키트", "cap": "mid"},
@@ -72,9 +82,11 @@ SECTOR_STOCKS = {
         {"code": "161580", "name": "필옵틱스", "cap": "mid"},
         {"code": "036710", "name": "주성엔지니어링", "cap": "mid"},
         {"code": "112290", "name": "와이씨켐", "cap": "mid"},
+        {"code": "222800", "name": "심텍", "cap": "mid"},
+        {"code": "323280", "name": "태성", "cap": "mid"},
     ],
 
-    # ETF: TIGER Fn인터넷 | AI·플랫폼·SW | 그룹A
+    # AI·플랫폼·IT서비스·SW | 그룹A
     "ai_software": [
         {"code": "035420", "name": "NAVER", "cap": "large"},
         {"code": "035720", "name": "카카오", "cap": "large"},
@@ -85,6 +97,7 @@ SECTOR_STOCKS = {
         {"code": "060900", "name": "대아티아이", "cap": "mid"},
         {"code": "089880", "name": "케이엘넷", "cap": "mid"},
         {"code": "307950", "name": "현대오토에버", "cap": "mid"},
+        {"code": "018260", "name": "삼성SDS", "cap": "large"},
     ],
 
     # IT하드웨어·가전·디스플레이 | 그룹A
@@ -96,7 +109,7 @@ SECTOR_STOCKS = {
         {"code": "006400", "name": "삼성SDI", "cap": "large"},
     ],
 
-    # ETF: TIGER K방산&우주(463250) | 그룹B
+    # ETF: TIGER K방산&우주(463250) | 그룹B 방어·정책
     "defense": [
         {"code": "012450", "name": "한화에어로스페이스", "cap": "large"},
         {"code": "047810", "name": "한국항공우주", "cap": "large"},
@@ -113,7 +126,7 @@ SECTOR_STOCKS = {
         {"code": "272550", "name": "케이엔솔", "cap": "mid"},
     ],
 
-    # 우주·항공 (defense 중복허용) | 그룹B
+    # 우주·항공·위성 (defense 중복허용) | 그룹B
     "space": [
         {"code": "099190", "name": "아이쓰리시스템", "cap": "mid"},
         {"code": "052460", "name": "쎄트렉아이", "cap": "mid"},
@@ -121,9 +134,11 @@ SECTOR_STOCKS = {
         {"code": "012450", "name": "한화에어로스페이스", "cap": "large"},
         {"code": "047810", "name": "한국항공우주", "cap": "large"},
         {"code": "272210", "name": "한화시스템", "cap": "large"},
+        {"code": "099220", "name": "인텔리안테크", "cap": "mid"},
+        {"code": "139780", "name": "컨텍", "cap": "mid"},
     ],
 
-    # ETF: TIGER 코리아휴머노이드로봇산업(0148J0) | 그룹B
+    # ETF: TIGER 코리아휴머노이드로봇산업 | 그룹B
     "robot": [
         {"code": "005380", "name": "현대차", "cap": "large"},
         {"code": "277810", "name": "레인보우로보틱스", "cap": "mid"},
@@ -137,6 +152,7 @@ SECTOR_STOCKS = {
         {"code": "056080", "name": "유진로봇", "cap": "mid"},
         {"code": "319400", "name": "현대무벡스", "cap": "mid"},
         {"code": "030530", "name": "원익홀딩스", "cap": "mid"},
+        {"code": "389500", "name": "에스비비테크", "cap": "mid"},
     ],
 
     # ETF: TIGER 조선TOP10(494670) | 그룹B
@@ -153,9 +169,10 @@ SECTOR_STOCKS = {
         {"code": "051760", "name": "한화엔진", "cap": "mid"},
         {"code": "037270", "name": "인터지스", "cap": "mid"},
         {"code": "100840", "name": "SNT에너지", "cap": "mid"},
+        {"code": "017960", "name": "한국카본", "cap": "mid"},
     ],
 
-    # ETF: KODEX 2차전지산업(305720) | 그룹C
+    # ETF: KODEX 2차전지산업(305720) | 그룹C 에너지 전환
     "battery": [
         {"code": "373220", "name": "LG에너지솔루션", "cap": "large"},
         {"code": "086520", "name": "에코프로비엠", "cap": "large"},
@@ -168,6 +185,9 @@ SECTOR_STOCKS = {
         {"code": "060970", "name": "에코프로이노베이션", "cap": "mid"},
         {"code": "011600", "name": "에코프로머티리얼즈", "cap": "mid"},
         {"code": "009180", "name": "한솔케미칼", "cap": "mid"},
+        {"code": "078600", "name": "대주전자재료", "cap": "mid"},
+        {"code": "457190", "name": "이수스페셜티케미컬", "cap": "mid"},
+        {"code": "383310", "name": "롯데에너지머티리얼즈", "cap": "mid"},
     ],
 
     # ETF: KODEX AI전력핵심설비(487240) | 그룹C
@@ -187,7 +207,7 @@ SECTOR_STOCKS = {
         {"code": "062040", "name": "산일전기", "cap": "mid"},
     ],
 
-    # ETF: KODEX K원자력SMR | TIGER 코리아원자력 | 그룹C
+    # ETF: KODEX K원자력SMR | 그룹C (건설사 중복허용)
     "nuclear": [
         {"code": "034020", "name": "두산에너빌리티", "cap": "large"},
         {"code": "015760", "name": "한국전력", "cap": "large"},
@@ -218,6 +238,10 @@ SECTOR_STOCKS = {
         {"code": "033170", "name": "에스에너지", "cap": "mid"},
         {"code": "195500", "name": "스페코", "cap": "mid"},
         {"code": "065690", "name": "삼강엠앤티", "cap": "mid"},
+        {"code": "322000", "name": "HD현대에너지솔루션", "cap": "mid"},
+        {"code": "475150", "name": "SK이터닉스", "cap": "mid"},
+        {"code": "389260", "name": "대명에너지", "cap": "mid"},
+        {"code": "035600", "name": "OCI", "cap": "mid"},
     ],
 
     # ETF: KODEX 자동차(261060) | 그룹C
@@ -236,7 +260,7 @@ SECTOR_STOCKS = {
         {"code": "007340", "name": "DN오토모티브", "cap": "mid"},
     ],
 
-    # 5G·6G 통신장비·네트워크 | 그룹C
+    # 5G·6G·광통신·통신장비 | 그룹C
     "telecom": [
         {"code": "017670", "name": "SK텔레콤", "cap": "large"},
         {"code": "030200", "name": "KT", "cap": "large"},
@@ -244,9 +268,15 @@ SECTOR_STOCKS = {
         {"code": "078070", "name": "유비쿼스홀딩스", "cap": "mid"},
         {"code": "232140", "name": "와이솔", "cap": "mid"},
         {"code": "038680", "name": "에스넷", "cap": "mid"},
+        {"code": "010170", "name": "대한광통신", "cap": "mid"},
+        {"code": "138080", "name": "오이솔루션", "cap": "mid"},
+        {"code": "218410", "name": "RFHIC", "cap": "mid"},
+        {"code": "050890", "name": "쏠리드", "cap": "mid"},
+        {"code": "170790", "name": "파이버프로", "cap": "mid"},
+        {"code": "178320", "name": "서진시스템", "cap": "mid"},
     ],
 
-    # 철강·비철금속 | 그룹D
+    # 철강·특수강·비철금속 | 그룹D 경기민감
     "steel": [
         {"code": "005490", "name": "POSCO홀딩스", "cap": "large"},
         {"code": "004020", "name": "현대제철", "cap": "large"},
@@ -266,6 +296,9 @@ SECTOR_STOCKS = {
         {"code": "011420", "name": "갑을메탈", "cap": "mid"},
         {"code": "001230", "name": "동국홀딩스", "cap": "mid"},
         {"code": "025820", "name": "이구산업", "cap": "mid"},
+        {"code": "295310", "name": "에이치브이엠", "cap": "mid"},
+        {"code": "003030", "name": "세아제강지주", "cap": "mid"},
+        {"code": "058650", "name": "세아베스틸지주", "cap": "mid"},
     ],
 
     # 화학·소재 | 그룹D
@@ -283,7 +316,7 @@ SECTOR_STOCKS = {
         {"code": "000390", "name": "삼화페인트", "cap": "mid"},
     ],
 
-    # 정유·가스 | 그룹D
+    # 정유·가스·배관 | 그룹D
     "oil_gas": [
         {"code": "117580", "name": "대성에너지", "cap": "mid"},
         {"code": "036460", "name": "한국가스공사", "cap": "large"},
@@ -291,6 +324,7 @@ SECTOR_STOCKS = {
         {"code": "078930", "name": "GS", "cap": "large"},
         {"code": "018670", "name": "SK가스", "cap": "mid"},
         {"code": "011170", "name": "롯데케미칼", "cap": "large"},
+        {"code": "014620", "name": "성광벤드", "cap": "mid"},
     ],
 
     # 건설·부동산 | 그룹D
@@ -308,7 +342,7 @@ SECTOR_STOCKS = {
         {"code": "010780", "name": "아이에스동서", "cap": "mid"},
     ],
 
-    # 물류·운송 | 그룹D
+    # 물류·운송·항공 | 그룹D
     "logistics": [
         {"code": "003490", "name": "대한항공", "cap": "large"},
         {"code": "020560", "name": "아시아나항공", "cap": "large"},
@@ -319,7 +353,7 @@ SECTOR_STOCKS = {
         {"code": "028670", "name": "팬오션", "cap": "mid"},
     ],
 
-    # ETF: KODEX 바이오(143860) | 그룹E
+    # ETF: KODEX 바이오(143860) | 그룹E 내수·방어
     "healthcare": [
         {"code": "207940", "name": "삼성바이오로직스", "cap": "large"},
         {"code": "068270", "name": "셀트리온", "cap": "large"},
@@ -338,6 +372,7 @@ SECTOR_STOCKS = {
         {"code": "284620", "name": "CJ바이오사이언스", "cap": "mid"},
         {"code": "005690", "name": "파마리서치", "cap": "mid"},
         {"code": "095700", "name": "제넥신", "cap": "mid"},
+        {"code": "000250", "name": "삼천당제약", "cap": "mid"},
     ],
 
     # 엔터·게임·K컬처 | 그룹E
@@ -359,7 +394,7 @@ SECTOR_STOCKS = {
         {"code": "030000", "name": "제일기획", "cap": "mid"},
     ],
 
-    # 유통·소비재 | 그룹E
+    # 유통·소비재·화장품 | 그룹E
     "consumer": [
         {"code": "023530", "name": "롯데쇼핑", "cap": "large"},
         {"code": "139480", "name": "이마트", "cap": "large"},
