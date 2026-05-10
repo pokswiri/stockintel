@@ -31,11 +31,11 @@ SECTOR_STOCKS = {
         {"code": "121600", "name": "나노신소재", "cap": "mid"},
         {"code": "036830", "name": "솔브레인홀딩스", "cap": "mid"},
         {"code": "084370", "name": "유진테크", "cap": "mid"},
-        {"code": "036490", "name": "에이피티씨", "cap": "mid"},
+        {"code": "089970", "name": "에이피티씨", "cap": "mid"},
         {"code": "200710", "name": "에이디테크놀로지", "cap": "mid"},
         {"code": "029080", "name": "하이비젼시스템", "cap": "mid"},
         {"code": "024900", "name": "덕산하이메탈", "cap": "mid"},
-        {"code": "045510", "name": "에이피티씨", "cap": "mid"},
+        
         {"code": "440110", "name": "파두", "cap": "mid"},
     ],
 
@@ -143,7 +143,7 @@ SECTOR_STOCKS = {
         {"code": "005380", "name": "현대차", "cap": "large"},
         {"code": "277810", "name": "레인보우로보틱스", "cap": "mid"},
         {"code": "108490", "name": "로보티즈", "cap": "mid"},
-        {"code": "090355", "name": "로보스타", "cap": "mid"},
+        {"code": "090360", "name": "로보스타", "cap": "mid"},
         {"code": "277070", "name": "글로벌세아", "cap": "mid"},
         {"code": "454910", "name": "두산로보틱스", "cap": "mid"},
         {"code": "058610", "name": "에스피지", "cap": "mid"},

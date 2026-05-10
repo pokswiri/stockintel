@@ -391,6 +391,18 @@ def get_rotation_status(days: int = 10) -> dict:
             "data_days": 0,
         }
 
+    # 실제 거래일 수 계산 (오늘이 장 마감 후 기록된 날이면 아직 0거래일)
+    # records[-1]이 오늘 날짜면 아직 오늘 장이 반영된 것이므로 실거래일 = len - 1
+    from datetime import datetime, timezone, timedelta
+    KST = timezone(timedelta(hours=9))
+    today_str = datetime.now(KST).strftime("%Y-%m-%d")
+    last_date = records[-1].get("date", "") if records else ""
+
+    # 실제 유효 거래일 수: 오늘 장 마감 후 기록이면 len(records),
+    # 아직 오늘 장이 안 열렸거나 장중이면 len(records) - 1 (어제까지가 마지막)
+    # 단, 기록이 오늘 날짜로 되어 있어도 "오늘 장 마감 후" 수집이므로 정상 카운트
+    trading_days = len(records)  # 실제로 마감 후 기록된 날 수가 진짜 거래일 수
+
     recent = records[-days:] if len(records) >= days else records
     today_record = records[-1] if records else {}
     today_sectors = today_record.get("sectors", {})
@@ -479,7 +491,7 @@ def get_rotation_status(days: int = 10) -> dict:
 
     return {
         "available":     True,
-        "data_days":     len(records),
+        "data_days":     trading_days,
         "date":          today_record.get("date", ""),
         "kospi_chg":     today_record.get("kospi_chg", 0),
         "ai_sectors":    today_record.get("ai_sectors", []),
@@ -488,8 +500,8 @@ def get_rotation_status(days: int = 10) -> dict:
         "group_summary": group_summary,
         "accum_alert":   accum_alert,
         "predict":       predict,
-        "reliability":   "낮음" if len(records) < 7 else
-                         "보통" if len(records) < 20 else "높음",
+        "reliability":   "낮음" if trading_days < 7 else
+                         "보통" if trading_days < 20 else "높음",
     }
 
 
