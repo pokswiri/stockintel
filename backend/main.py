@@ -902,6 +902,21 @@ async def rotation_record_manual():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/rotation/reset")
+async def rotation_reset():
+    """섹터 이력 초기화 — 잘못된 데이터 삭제용"""
+    if not _SECTOR_TRACKER_LOADED:
+        return JSONResponse({"error": "sector_tracker 비활성화"}, status_code=503)
+    try:
+        import os, json
+        history_file = os.environ.get("SECTOR_HISTORY_FILE", "/data/sector_history.json")
+        with open(history_file, "w", encoding="utf-8") as f:
+            json.dump({"records": [], "version": 1}, f)
+        return {"success": True, "message": "섹터 이력 초기화 완료"}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/etf/compositions/{etf_code}")
 async def etf_compositions(etf_code: str):
     """
