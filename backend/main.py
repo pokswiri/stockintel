@@ -873,6 +873,65 @@ def rotation(days: int = Query(default=10, ge=1, le=90)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/rotation/etf-live")
+async def rotation_etf_live():
+    """
+    25개 섹터 ETF(또는 대표주) 실시간 등락률 조회
+    ETF 없는 섹터는 대표주 가격으로 대체
+    """
+    if not is_kis_available():
+        return JSONResponse({"error": "KIS API 미설정"}, status_code=503)
+    try:
+        from kis_official import fetch_etf_price, SECTOR_ETF_CODES, batch_fetch_prices
+
+        FALLBACK = {
+            'telecom':     ('017670', 'SK텔레콤'),
+            'steel':       ('005490', 'POSCO홀딩스'),
+            'chemical':    ('051910', 'LG화학'),
+            'construction':('000720', '현대건설'),
+            'logistics':   ('003490', '대한항공'),
+            'consumer':    ('090430', '아모레퍼시픽'),
+        }
+
+        # 조회할 (섹터, 코드, 이름, 타입) 목록
+        targets = []
+        for sk, (code, name) in SECTOR_ETF_CODES.items():
+            if sk in ('finance', 'ai_platform'):  # 중복 섹터 제외
+                continue
+            if code == 'NONE':
+                if sk in FALLBACK:
+                    fc, fn = FALLBACK[sk]
+                    targets.append((sk, fc, fn, 'stock'))
+            else:
+                targets.append((sk, code, name, 'etf'))
+
+        # 배치 가격 조회
+        codes = list(dict.fromkeys([c for _, c, _, _ in targets]))
+        price_map = await batch_fetch_prices(codes)
+
+        result = {}
+        for sk, code, name, typ in targets:
+            pd = price_map.get(code, {}) if isinstance(price_map, dict) else {}
+            result[sk] = {
+                'code':       code,
+                'name':       name,
+                'type':       typ,
+                'price':      pd.get('price', 0),
+                'change_rate': pd.get('change_rate', 0),
+                'volume':     pd.get('volume', 0),
+            }
+
+        # 등락률 기준 정렬
+        sorted_result = dict(sorted(result.items(),
+            key=lambda x: x[1]['change_rate'], reverse=True))
+        return {'sectors': sorted_result, 'count': len(sorted_result)}
+
+    except Exception as e:
+        import traceback
+        return JSONResponse({'error': str(e), 'trace': traceback.format_exc()[:300]},
+                            status_code=500)
+
+
 @app.get("/rotation/sector/{sector_key}")
 def rotation_sector(sector_key: str, days: int = Query(default=14, ge=1, le=90)):
     """특정 섹터의 N일 트렌드 조회"""
