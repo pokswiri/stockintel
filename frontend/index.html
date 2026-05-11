@@ -1081,6 +1081,267 @@ function closeRotation() {
   document.getElementById('rotation-panel').style.display = 'none';
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 플랜1: ETF 실시간 히트맵
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _etfLiveData = null, _etfLiveFetchedAt = 0;
+const ETF_CACHE_MS = 5 * 60 * 1000; // 5분 캐시
+
+async function loadEtfLive(force=false) {
+  const box = document.getElementById('rot-etf-live');
+  if (!box) return;
+  const now = Date.now();
+  if (_etfLiveData && !force && (now - _etfLiveFetchedAt) < ETF_CACHE_MS) {
+    renderEtfLive(_etfLiveData); return;
+  }
+  box.innerHTML = '<div style="font-size:11px;color:var(--txt3);padding:8px 0;text-align:center">📡 실시간 조회 중...</div>';
+  try {
+    const d = await fetch(`${API}/rotation/etf-live`, {signal:AbortSignal.timeout(20000)}).then(r=>r.json());
+    if (d.error) throw new Error(d.error);
+    _etfLiveData = d; _etfLiveFetchedAt = Date.now();
+    renderEtfLive(d);
+  } catch(e) {
+    box.innerHTML = `<div style="font-size:11px;color:#f87171;padding:8px 0">조회 실패: ${e.message}</div>`;
+  }
+}
+
+function renderEtfLive(d) {
+  const box = document.getElementById('rot-etf-live');
+  if (!box) return;
+  const sectors = d.sectors || {};
+  const entries = Object.entries(sectors);
+  if (!entries.length) { box.innerHTML = '<div style="font-size:11px;color:var(--txt3)">데이터 없음</div>'; return; }
+
+  // 최대 절댓값 기준으로 바 너비 계산
+  const maxAbs = Math.max(...entries.map(([,v]) => Math.abs(v.change_rate||0)), 0.01);
+
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span style="font-size:10px;color:var(--txt3)">등락률 순 | 5분 캐시</span>
+    <button onclick="loadEtfLive(true)" style="font-size:10px;color:var(--txt3);background:none;border:1px solid var(--line2);border-radius:4px;padding:2px 7px;cursor:pointer">↻ 갱신</button>
+  </div>`;
+
+  // 상위 5개 / 하위 5개 + 나머지 접기
+  const top5    = entries.slice(0, 5);
+  const bot5    = entries.slice(-5);
+  const middle  = entries.slice(5, -5);
+
+  const renderRow = ([sk, v]) => {
+    const chg = v.change_rate || 0;
+    const col = chg > 0 ? '#34d399' : chg < 0 ? '#f87171' : '#6b7280';
+    const bg  = chg > 0 ? 'rgba(52,211,153,.15)' : chg < 0 ? 'rgba(248,113,113,.15)' : 'var(--bg3)';
+    const pct = Math.min(100, Math.round(Math.abs(chg) / maxAbs * 100));
+    const sign = chg > 0 ? '+' : '';
+    const isFav = _favSectors.has(sk);
+    return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--line2)">
+      <button onclick="toggleFavSector('${sk}',this)" style="background:none;border:none;font-size:12px;cursor:pointer;padding:0;flex-shrink:0">${isFav?'⭐':'☆'}</button>
+      <span style="font-size:11px;color:var(--txt1);width:88px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${SECTOR_KR[sk]||sk}</span>
+      <div style="flex:1;background:var(--bg3);border-radius:2px;height:5px">
+        <div style="width:${pct}%;background:${col};height:100%;border-radius:2px"></div>
+      </div>
+      <span style="font-size:11px;font-weight:700;color:${col};width:46px;text-align:right;flex-shrink:0">${sign}${chg.toFixed(2)}%</span>
+    </div>`;
+  };
+
+  html += top5.map(renderRow).join('');
+  if (middle.length) {
+    html += `<div id="etf-mid-wrap" style="display:none">${middle.map(renderRow).join('')}</div>
+      <button onclick="document.getElementById('etf-mid-wrap').style.display=document.getElementById('etf-mid-wrap').style.display==='none'?'block':'none';this.textContent=this.textContent.includes('더보기')?'접기':'더보기 ▸'"
+        style="width:100%;font-size:10px;color:var(--txt3);background:none;border:none;padding:4px 0;cursor:pointer">더보기 ▸</button>`;
+  }
+  html += bot5.map(renderRow).join('');
+  box.innerHTML = html;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 플랜3: 섹터 즐겨찾기
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const _favSectors = new Set(JSON.parse(localStorage.getItem('favSectors')||'[]'));
+
+function toggleFavSector(sk, btn) {
+  if (_favSectors.has(sk)) {
+    _favSectors.delete(sk);
+    if (btn) btn.textContent = '☆';
+  } else {
+    if (_favSectors.size >= 5) { alert('즐겨찾기는 최대 5개입니다'); return; }
+    _favSectors.add(sk);
+    if (btn) btn.textContent = '⭐';
+  }
+  localStorage.setItem('favSectors', JSON.stringify([..._favSectors]));
+  _renderFavBar();
+}
+
+function _renderFavBar() {
+  const bar = document.getElementById('rot-fav-bar');
+  if (!bar) return;
+  if (_favSectors.size === 0) {
+    bar.innerHTML = '<span style="font-size:11px;color:var(--txt3)">☆ 히트맵에서 별표 클릭 시 즐겨찾기 등록</span>';
+    return;
+  }
+  bar.innerHTML = [..._favSectors].map(sk =>
+    `<button onclick="quickFavScore('${sk}',this)"
+      style="font-size:11px;padding:5px 10px;border-radius:8px;background:rgba(99,102,241,.15);
+      border:1px solid rgba(99,102,241,.4);color:#a5b4fc;cursor:pointer;white-space:nowrap">
+      ⭐ ${SECTOR_KR[sk]||sk}
+    </button>`
+  ).join('') +
+  `<button onclick="document.getElementById('rot-fav-scores').style.display='none';_selectedSectors.clear()"
+    style="font-size:10px;color:var(--txt3);background:none;border:none;cursor:pointer;padding:4px">초기화</button>`;
+}
+
+async function quickFavScore(sk, btn) {
+  const box = document.getElementById('rot-fav-scores');
+  box.style.display = 'block';
+  const cacheKey = sk;
+  delete _scoreCache[cacheKey];
+  const tmpId = 'fav-tmp-btn'; btn.id = tmpId;
+  await loadSectorScores([sk], 'rot-fav-scores', tmpId);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 플랜5: 관심 종목 빠른 스코어 카드
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const _watchCodes = JSON.parse(localStorage.getItem('watchCodes')||'[]');
+
+function addWatchCode() {
+  const inp = document.getElementById('watch-input');
+  const val = inp.value.trim().replace(/\s+/g,'');
+  if (!val) return;
+  const parts = val.split(/[,，]/);
+  parts.forEach(p => {
+    p = p.trim();
+    if (p.length === 6 && /^\d{6}$/.test(p)) {
+      if (!_watchCodes.includes(p) && _watchCodes.length < 10) _watchCodes.push(p);
+    }
+  });
+  localStorage.setItem('watchCodes', JSON.stringify(_watchCodes));
+  inp.value = '';
+  _renderWatchList();
+}
+
+function removeWatchCode(code) {
+  const idx = _watchCodes.indexOf(code);
+  if (idx >= 0) _watchCodes.splice(idx, 1);
+  localStorage.setItem('watchCodes', JSON.stringify(_watchCodes));
+  _renderWatchList();
+}
+
+function _renderWatchList() {
+  const box = document.getElementById('watch-tags');
+  if (!box) return;
+  box.innerHTML = _watchCodes.map(c =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;
+      background:var(--bg3);border:1px solid var(--line);border-radius:6px;padding:3px 8px">
+      ${c}
+      <button onclick="removeWatchCode('${c}')" style="background:none;border:none;color:var(--txt3);cursor:pointer;font-size:12px;padding:0;line-height:1">✕</button>
+    </span>`
+  ).join('');
+}
+
+async function loadWatchScores() {
+  if (!_watchCodes.length) { alert('관심 종목 코드를 추가하세요'); return; }
+  const btn = document.getElementById('watch-load-btn');
+  const box = document.getElementById('watch-scores');
+  if (!btn || !box) return;
+  btn.disabled = true; btn.textContent = '⏳ 조회 중...';
+  box.style.display = 'block';
+  box.innerHTML = '<div style="font-size:12px;color:var(--txt3);padding:8px 0">NEXUS 점수 산출 중...</div>';
+  try {
+    // 관심 종목은 /score 개별 병렬 조회
+    const results = await Promise.all(_watchCodes.map(code =>
+      fetch(`${API}/score?code=${code}`, {signal:AbortSignal.timeout(20000)})
+        .then(r=>r.json()).catch(()=>({error:'조회실패',code}))
+    ));
+    let html = '';
+    results.forEach((d, i) => {
+      const code = _watchCodes[i];
+      if (d.error && !d.total) {
+        html += `<div style="padding:8px 0;border-bottom:1px solid var(--line2);font-size:11px;color:#f87171">${code}: 조회 실패</div>`;
+        return;
+      }
+      const grade = d.grade||'';
+      const gc = grade==='HIGH'?'#f97316':grade==='MID'?'#facc15':'#6b7280';
+      const chg = d.change_rate||0;
+      const chgCol = chg>=0?'#34d399':'#f87171';
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line2)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--txt1)">${d.name||code} <span style="font-size:10px;color:var(--txt3)">${code}</span></div>
+          ${scoreBar(d.total)}
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:15px;font-weight:800;color:${gc}">${d.total??'-'}<span style="font-size:9px;color:var(--txt3)">/130</span></div>
+          <div style="font-size:10px;font-weight:600;color:${gc}">${grade}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;width:48px">
+          <div style="font-size:11px;color:${chgCol};font-weight:600">${chg>=0?'+':''}${chg.toFixed(2)}%</div>
+        </div>
+      </div>`;
+    });
+    box.innerHTML = html || '<div style="font-size:12px;color:var(--txt3)">데이터 없음</div>';
+  } catch(e) {
+    box.innerHTML = `<div style="font-size:12px;color:#f87171">오류: ${e.message}</div>`;
+  }
+  btn.disabled = false; btn.textContent = '🔍 점수 조회';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 플랜4: 점수 breakdown 시각화 (miniNexusCard 확장)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function breakdownBar(bd) {
+  if (!bd || !Object.keys(bd).length) return '';
+  const ITEMS = [
+    {k:'stage',    label:'스테이지',  max:30, col:'#60a5fa'},
+    {k:'volume',   label:'거래량',    max:25, col:'#34d399'},
+    {k:'frgn',     label:'외국인',    max:25, col:'#a78bfa'},
+    {k:'technical',label:'기술패턴',  max:25, col:'#fbbf24'},
+    {k:'candle',   label:'캔들',      max:15, col:'#f97316'},
+    {k:'money',    label:'자금흐름',  max:10, col:'#f87171'},
+  ];
+  return ITEMS.filter(i => i.k in bd).map(i => {
+    const v = bd[i.k] ?? 0;
+    const pct = Math.min(100, Math.round(v / i.max * 100));
+    return `<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
+      <span style="font-size:9px;color:var(--txt3);width:44px;flex-shrink:0">${i.label}</span>
+      <div style="flex:1;background:var(--bg3);border-radius:2px;height:4px">
+        <div style="width:${pct}%;background:${i.col};height:100%;border-radius:2px"></div>
+      </div>
+      <span style="font-size:9px;color:${i.col};width:24px;text-align:right">${v}</span>
+    </div>`;
+  }).join('');
+}
+
+// miniNexusCard 확장 버전 (breakdown 포함)
+function miniNexusCardFull(s) {
+  if (s.error) return `<div style="padding:8px 0;border-bottom:1px solid var(--line2);font-size:11px;color:#f87171">${s.name||s.code}: 조회 실패</div>`;
+  const grade = s.grade||'';
+  const gc = grade==='HIGH'?'#f97316':grade==='MID'?'#facc15':'#6b7280';
+  const chg = s.change_rate||0;
+  const chgStr = (chg>=0?'+':'')+chg.toFixed(2)+'%';
+  const chgCol = chg>=0?'#34d399':'#f87171';
+  const bdHtml = breakdownBar(s.breakdown);
+  const uid = `bd-${s.code}-${Date.now()}`;
+  return `<div style="padding:9px 0;border-bottom:1px solid var(--line2)">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:${bdHtml?'6px':'0'}">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px;font-weight:600;color:var(--txt1)">${s.name}</span>
+          <span style="font-size:10px;color:var(--txt3)">${s.code}</span>
+        </div>
+        ${scoreBar(s.total)}
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:15px;font-weight:800;color:${gc}">${s.total??'-'}<span style="font-size:9px;color:var(--txt3)">/130</span></div>
+        <div style="font-size:10px;font-weight:600;color:${gc}">${grade}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;width:48px">
+        <div style="font-size:11px;color:${chgCol};font-weight:600">${chgStr}</div>
+      </div>
+    </div>
+    ${bdHtml ? `<div id="${uid}" style="padding:4px 0">${bdHtml}</div>` : ''}
+  </div>`;
+}
+
+
+
 const SECTOR_KR = {
   semiconductor:'반도체 대형', semiconductor_parts:'반도체 장비·부품',
   glass_substrate:'유리기판·PCB', ai_software:'AI·플랫폼·SW',
@@ -1189,7 +1450,7 @@ function renderSectorScores(box, data) {
   for (const [sk, sec] of Object.entries(data.sectors||{})) {
     html += `<div style="margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;color:var(--txt3);margin-bottom:4px">${sec.sector_kr}</div>
-      ${sec.stocks.map(s => miniNexusCard(s)).join('')}
+      ${sec.stocks.map(s => miniNexusCardFull(s)).join('')}
     </div>`;
   }
   if (data.note) html += `<div style="font-size:10px;color:var(--txt3);margin-top:6px">※ ${data.note}</div>`;
@@ -1352,7 +1613,52 @@ function renderRotation(d) {
     <div id="${selBoxId}" style="display:none;margin-top:8px"></div>
   </div>`;
 
+  // ══ ④ ETF 실시간 히트맵 ═══════════════════════════════════════
+  html += `<div class="lbl" style="margin:12px 0 8px">📡 섹터 ETF 실시간 등락률</div>
+  <div class="card" style="padding:10px 14px;margin-bottom:12px">
+    <div id="rot-etf-live">
+      <div style="font-size:11px;color:var(--txt3);padding:8px 0;text-align:center">⏳ 로딩 중...</div>
+    </div>
+  </div>`;
+
+  // ══ ⑤ 즐겨찾기 섹터 빠른 조회 ══════════════════════════════════
+  html += `<div class="lbl" style="margin:12px 0 8px">⭐ 즐겨찾기 섹터</div>
+  <div class="card" style="padding:10px 14px;margin-bottom:12px">
+    <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">히트맵 ☆ 클릭으로 등록 · 최대 5개 · 클릭 시 대장주 점수 즉시 조회</div>
+    <div id="rot-fav-bar" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+    <div id="rot-fav-scores" style="display:none;margin-top:8px"></div>
+  </div>`;
+
+  // ══ ⑥ 관심 종목 스코어 카드 ══════════════════════════════════
+  html += `<div class="lbl" style="margin:12px 0 8px">📌 관심 종목 NEXUS 점수</div>
+  <div class="card" style="padding:10px 14px;margin-bottom:12px">
+    <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">종목코드 6자리 입력 (최대 10개) · 콤마로 여러 개 입력 가능</div>
+    <div id="watch-tags" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px"></div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <input id="watch-input" type="text" placeholder="예: 005380, 000660"
+        style="flex:1;padding:7px 10px;background:var(--bg3);border:1px solid var(--line);
+        border-radius:6px;color:var(--txt1);font-size:12px;outline:none"
+        onkeydown="if(event.key==='Enter')addWatchCode()">
+      <button onclick="addWatchCode()"
+        style="padding:7px 12px;background:var(--bg3);border:1px solid var(--line);
+        border-radius:6px;color:var(--txt2);font-size:12px;cursor:pointer">추가</button>
+    </div>
+    <button id="watch-load-btn" onclick="loadWatchScores()"
+      style="width:100%;padding:9px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);
+      border-radius:8px;color:#a5b4fc;font-size:12px;cursor:pointer;font-weight:600;margin-bottom:6px">
+      🔍 점수 조회
+    </button>
+    <div id="watch-scores" style="display:none;margin-top:4px"></div>
+  </div>`;
+
   document.getElementById('rot-content').innerHTML = html;
+
+  // 새 섹션들 초기화 (렌더링 후 실행)
+  setTimeout(() => {
+    _renderFavBar();
+    _renderWatchList();
+    loadEtfLive();  // ETF 히트맵 자동 로드
+  }, 0);
 }
 
 // 섹터 선택 토글
