@@ -98,6 +98,7 @@ SECTOR_STOCKS = {
         {"code": "089880", "name": "케이엘넷", "cap": "mid"},
         {"code": "307950", "name": "현대오토에버", "cap": "mid"},
         {"code": "018260", "name": "삼성SDS", "cap": "large"},
+        {"code": "064400", "name": "LG씨엔에스", "cap": "large"},
     ],
 
     # IT하드웨어·가전·디스플레이 | 그룹A
@@ -106,8 +107,7 @@ SECTOR_STOCKS = {
         {"code": "034220", "name": "LG디스플레이", "cap": "large"},
         {"code": "005930", "name": "삼성전자", "cap": "large"},
         {"code": "000660", "name": "SK하이닉스", "cap": "large"},
-        {"code": "006400", "name": "삼성SDI", "cap": "large"},
-    ],
+            ],
 
     # ETF: TIGER K방산&우주(463250) | 그룹B 방어·정책
     "defense": [
@@ -174,6 +174,7 @@ SECTOR_STOCKS = {
 
     # ETF: KODEX 2차전지산업(305720) | 그룹C 에너지 전환
     "battery": [
+        {"code": "006400", "name": "삼성SDI", "cap": "large"},
         {"code": "373220", "name": "LG에너지솔루션", "cap": "large"},
         {"code": "086520", "name": "에코프로비엠", "cap": "large"},
         {"code": "247540", "name": "에코프로", "cap": "large"},
