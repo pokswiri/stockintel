@@ -411,8 +411,50 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
       </div>
       <div style="font-size:11px;color:var(--txt3);margin-top:4px" id="rot-subtitle">데이터 로딩 중...</div>
     </div>
+
+    <!-- 순환매 예측·순위 (동적 영역) -->
     <div id="rot-content" style="padding:12px 14px">
       <div class="card" style="text-align:center;padding:24px;color:var(--txt3);font-size:13px">불러오는 중...</div>
+    </div>
+
+    <!-- ④ ETF 실시간 히트맵 (정적 영역) -->
+    <div style="padding:0 14px">
+      <div class="lbl" style="margin:4px 0 8px">📡 섹터 ETF 실시간 등락률</div>
+      <div class="card" style="padding:10px 14px;margin-bottom:12px">
+        <div id="rot-etf-live">
+          <div style="font-size:11px;color:var(--txt3);padding:8px 0;text-align:center">순환매 탭 진입 시 자동 로드됩니다</div>
+        </div>
+      </div>
+
+      <!-- ⑤ 즐겨찾기 섹터 -->
+      <div class="lbl" style="margin:4px 0 8px">⭐ 즐겨찾기 섹터</div>
+      <div class="card" style="padding:10px 14px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">히트맵 ☆ 클릭으로 등록 · 최대 5개 · 클릭 시 대장주 점수 즉시 조회</div>
+        <div id="rot-fav-bar" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+        <div id="rot-fav-scores" style="display:none;margin-top:8px;background:var(--bg2);border-radius:8px;padding:8px 10px"></div>
+      </div>
+
+      <!-- ⑥ 관심 종목 스코어 카드 -->
+      <div class="lbl" style="margin:4px 0 8px">📌 관심 종목 NEXUS 점수</div>
+      <div class="card" style="padding:10px 14px;margin-bottom:12px">
+        <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">종목코드 6자리 입력 (최대 10개) · 콤마로 여러 개 입력 가능</div>
+        <div id="watch-tags" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px"></div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input id="watch-input" type="text" placeholder="예: 005380, 000660"
+            style="flex:1;padding:7px 10px;background:var(--bg3);border:1px solid var(--line);
+            border-radius:6px;color:var(--txt1);font-size:12px;outline:none"
+            onkeydown="if(event.key==='Enter')addWatchCode()">
+          <button onclick="addWatchCode()"
+            style="padding:7px 12px;background:var(--bg3);border:1px solid var(--line);
+            border-radius:6px;color:var(--txt2);font-size:12px;cursor:pointer">추가</button>
+        </div>
+        <button id="watch-load-btn" onclick="loadWatchScores()"
+          style="width:100%;padding:9px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);
+          border-radius:8px;color:#a5b4fc;font-size:12px;cursor:pointer;font-weight:600;margin-bottom:6px">
+          🔍 점수 조회
+        </button>
+        <div id="watch-scores" style="display:none;margin-top:4px"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -1586,7 +1628,7 @@ function renderRotation(d) {
 
   // ══ ③ 원하는 섹터 직접 점수 조회 ══════════════════════════════
   html += `<div class="lbl" style="margin:12px 0 8px">🔎 원하는 섹터 직접 점수 조회</div>
-  <div class="card" style="padding:10px 14px;margin-bottom:12px">
+  <div class="card" style="padding:10px 14px;margin-bottom:4px">
     <div style="font-size:11px;color:var(--txt3);margin-bottom:10px">섹터 선택 (최대 5개) → 대장주 NEXUS 점수 조회 · 초기화 후 다른 섹터 재조회 가능</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px" id="rot-sec-select">`;
 
@@ -1613,51 +1655,13 @@ function renderRotation(d) {
     <div id="${selBoxId}" style="display:none;margin-top:8px"></div>
   </div>`;
 
-  // ══ ④ ETF 실시간 히트맵 ═══════════════════════════════════════
-  html += `<div class="lbl" style="margin:12px 0 8px">📡 섹터 ETF 실시간 등락률</div>
-  <div class="card" style="padding:10px 14px;margin-bottom:12px">
-    <div id="rot-etf-live">
-      <div style="font-size:11px;color:var(--txt3);padding:8px 0;text-align:center">⏳ 로딩 중...</div>
-    </div>
-  </div>`;
-
-  // ══ ⑤ 즐겨찾기 섹터 빠른 조회 ══════════════════════════════════
-  html += `<div class="lbl" style="margin:12px 0 8px">⭐ 즐겨찾기 섹터</div>
-  <div class="card" style="padding:10px 14px;margin-bottom:12px">
-    <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">히트맵 ☆ 클릭으로 등록 · 최대 5개 · 클릭 시 대장주 점수 즉시 조회</div>
-    <div id="rot-fav-bar" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
-    <div id="rot-fav-scores" style="display:none;margin-top:8px"></div>
-  </div>`;
-
-  // ══ ⑥ 관심 종목 스코어 카드 ══════════════════════════════════
-  html += `<div class="lbl" style="margin:12px 0 8px">📌 관심 종목 NEXUS 점수</div>
-  <div class="card" style="padding:10px 14px;margin-bottom:12px">
-    <div style="font-size:10px;color:var(--txt3);margin-bottom:8px">종목코드 6자리 입력 (최대 10개) · 콤마로 여러 개 입력 가능</div>
-    <div id="watch-tags" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px"></div>
-    <div style="display:flex;gap:6px;margin-bottom:8px">
-      <input id="watch-input" type="text" placeholder="예: 005380, 000660"
-        style="flex:1;padding:7px 10px;background:var(--bg3);border:1px solid var(--line);
-        border-radius:6px;color:var(--txt1);font-size:12px;outline:none"
-        onkeydown="if(event.key==='Enter')addWatchCode()">
-      <button onclick="addWatchCode()"
-        style="padding:7px 12px;background:var(--bg3);border:1px solid var(--line);
-        border-radius:6px;color:var(--txt2);font-size:12px;cursor:pointer">추가</button>
-    </div>
-    <button id="watch-load-btn" onclick="loadWatchScores()"
-      style="width:100%;padding:9px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);
-      border-radius:8px;color:#a5b4fc;font-size:12px;cursor:pointer;font-weight:600;margin-bottom:6px">
-      🔍 점수 조회
-    </button>
-    <div id="watch-scores" style="display:none;margin-top:4px"></div>
-  </div>`;
-
   document.getElementById('rot-content').innerHTML = html;
 
-  // 새 섹션들 초기화 (렌더링 후 실행)
+  // 정적 섹션 초기화 (매 렌더링마다 상태 복원)
   setTimeout(() => {
     _renderFavBar();
     _renderWatchList();
-    loadEtfLive();  // ETF 히트맵 자동 로드
+    loadEtfLive();
   }, 0);
 }
 
