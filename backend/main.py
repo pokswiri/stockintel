@@ -955,11 +955,7 @@ def performance():
 
 @app.delete("/performance/{code}")
 def performance_delete(code: str, rec_date: str = Query(..., description="삭제할 추천일 (YYYY-MM-DD)")):
-    """
-    특정 추천 기록 삭제
-    code: 종목코드 (예: 005930)
-    rec_date: 추천일 (예: 2026-05-05)
-    """
+    """특정 추천 기록 삭제"""
     if not _TRACKER_LOADED:
         return JSONResponse({"error": "tracker 모듈 비활성화"}, status_code=503)
     try:
@@ -969,6 +965,28 @@ def performance_delete(code: str, rec_date: str = Query(..., description="삭제
         return JSONResponse({"success": False, "message": "해당 기록 없음"}, status_code=404)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/performance/bulk-delete")
+def performance_bulk_delete(body: dict):
+    """
+    성과 기록 일괄 삭제
+    body: {"items": [{"code": "005930", "rec_date": "2026-05-10"}, ...]}
+    """
+    if not _TRACKER_LOADED:
+        return JSONResponse({"error": "tracker 모듈 비활성화"}, status_code=503)
+    items = body.get("items", [])
+    if not items:
+        return JSONResponse({"error": "삭제할 항목 없음"}, status_code=400)
+    deleted, failed = 0, 0
+    for item in items:
+        try:
+            ok = delete_record(item.get("code",""), item.get("rec_date",""))
+            if ok: deleted += 1
+            else:  failed  += 1
+        except:
+            failed += 1
+    return {"success": True, "deleted": deleted, "failed": failed}
 
 
 @app.get("/health")
