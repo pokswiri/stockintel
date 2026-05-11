@@ -404,7 +404,10 @@ button{cursor:pointer;border:none;font-family:var(--sans);outline:none;-webkit-a
     <div style="position:sticky;top:0;background:rgba(8,12,20,.95);backdrop-filter:blur(12px);padding:14px 16px 10px;border-bottom:1px solid var(--line);z-index:10">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div style="font-size:16px;font-weight:700">🔄 순환매 섹터</div>
-        <button onclick="closeRotation()" style="background:none;border:none;color:var(--txt3);font-size:20px;cursor:pointer">✕</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button onclick="loadRotation(true)" style="background:none;border:1px solid var(--line);border-radius:6px;color:var(--txt3);font-size:11px;padding:4px 8px;cursor:pointer">↻ 새로고침</button>
+          <button onclick="closeRotation()" style="background:none;border:none;color:var(--txt3);font-size:20px;cursor:pointer">✕</button>
+        </div>
       </div>
       <div style="font-size:11px;color:var(--txt3);margin-top:4px" id="rot-subtitle">데이터 로딩 중...</div>
     </div>
@@ -832,6 +835,61 @@ async function deletePerfRecord(code, recDate) {
   }
 }
 
+// 일괄 삭제
+const _perfChecked = new Set(); // "code::date" 형태
+
+function togglePerfCheck(key, cb) {
+  if (cb.checked) _perfChecked.add(key);
+  else _perfChecked.delete(key);
+  _updateBulkDeleteBtn();
+}
+
+function togglePerfDateGroup(date, checked) {
+  document.querySelectorAll(`.perf-cb-${date.replace(/-/g,'')}`).forEach(cb => {
+    cb.checked = checked;
+    const key = cb.dataset.key;
+    if (checked) _perfChecked.add(key);
+    else _perfChecked.delete(key);
+  });
+  _updateBulkDeleteBtn();
+}
+
+function _updateBulkDeleteBtn() {
+  const btn = document.getElementById('perf-bulk-del-btn');
+  if (!btn) return;
+  const cnt = _perfChecked.size;
+  btn.textContent = cnt > 0 ? `선택 삭제 (${cnt}건)` : '선택 삭제';
+  btn.disabled = cnt === 0;
+  btn.style.opacity = cnt > 0 ? '1' : '0.4';
+}
+
+async function bulkDeletePerf() {
+  if (_perfChecked.size === 0) return;
+  if (!confirm(`선택한 ${_perfChecked.size}건을 삭제할까요?`)) return;
+  const items = [..._perfChecked].map(k => {
+    const [code, rec_date] = k.split('::');
+    return { code, rec_date };
+  });
+  try {
+    const res = await fetch(`${API}/performance/bulk-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+      signal: AbortSignal.timeout(15000)
+    });
+    const d = await res.json();
+    if (d.success) {
+      _perfChecked.clear();
+      _perfLoaded = false;
+      loadPerf(true);
+    } else {
+      alert('삭제 실패: ' + (d.error || '오류'));
+    }
+  } catch(e) {
+    alert('삭제 오류: ' + e.message);
+  }
+}
+
 // ── 개별 종목 NEXUS 점수 조회 ─────────────────────────────────────
 let _scoreTimer = null;
 let _selectedCode = '';
@@ -964,19 +1022,58 @@ async function doScore() {
 
 // ── 순환매 섹터 탭 ────────────────────────────────────────────────
 let _rotLoaded = false;
+let _rotData   = null;       // 캐시된 데이터
+let _rotFetchedAt = 0;       // 마지막 fetch 시각 (ms)
+const ROT_CACHE_MS = 30 * 60 * 1000;  // 30분
 
-function loadRotation(force=false) {
-  if (_rotLoaded && !force) return;
-  _rotLoaded = true;
-  document.getElementById('rotation-panel').style.display = 'block';
-  document.getElementById('rot-content').innerHTML =
-    '<div class="card" style="text-align:center;padding:28px;color:var(--txt3);font-size:13px">⏳ 섹터 데이터 로딩 중...</div>';
+// 앱 시작 시 백그라운드 프리로드 (탭 클릭 전에 미리 데이터 받아둠)
+function preloadRotation() {
+  if (_rotData) return;  // 이미 있으면 스킵
   fetch(`${API}/rotation?days=10`, { signal: AbortSignal.timeout(15000) })
     .then(r => r.json())
-    .then(renderRotation)
+    .then(d => {
+      _rotData = d;
+      _rotFetchedAt = Date.now();
+      // 이미 패널이 열려있으면 즉시 렌더
+      if (document.getElementById('rotation-panel').style.display !== 'none') {
+        renderRotation(d);
+      }
+    })
+    .catch(() => {}); // 백그라운드 실패는 조용히 무시
+}
+// 페이지 로드 2초 후 프리로드 (메인 분석보다 후순위)
+setTimeout(preloadRotation, 2000);
+
+function loadRotation(force=false) {
+  document.getElementById('rotation-panel').style.display = 'block';
+  document.querySelectorAll('.sec').forEach(x => x.classList.remove('on'));
+
+  const now = Date.now();
+  const cacheValid = _rotData && (now - _rotFetchedAt) < ROT_CACHE_MS;
+
+  // 캐시 유효하고 강제 새로고침 아니면 즉시 표시
+  if (cacheValid && !force) {
+    renderRotation(_rotData);
+    return;
+  }
+
+  // 캐시 없거나 만료 → 로딩 표시 후 fetch
+  if (!cacheValid) {
+    document.getElementById('rot-content').innerHTML =
+      '<div class="card" style="text-align:center;padding:28px;color:var(--txt3);font-size:13px">⏳ 섹터 데이터 로딩 중...</div>';
+  }
+
+  fetch(`${API}/rotation?days=10`, { signal: AbortSignal.timeout(15000) })
+    .then(r => r.json())
+    .then(d => {
+      _rotData = d;
+      _rotFetchedAt = Date.now();
+      _rotLoaded = true;
+      renderRotation(d);
+    })
     .catch(e => {
       document.getElementById('rot-content').innerHTML =
-        `<div class="card" style="color:#f87171;padding:16px;font-size:13px">로드 실패: ${e.message}</div>`;
+        `<div class="card" style="color:#f87171;padding:16px;font-size:13px">로드 실패: ${e.message}<br><button onclick="loadRotation(true)" style="margin-top:8px;padding:6px 14px;background:var(--bg3);border:1px solid var(--line);border-radius:6px;color:var(--txt2);cursor:pointer;font-size:12px">다시 시도</button></div>`;
     });
 }
 
@@ -1412,40 +1509,74 @@ function renderPerf(d) {
   }
 
   // 최근 추천 이력
-  html += `<div class="lbl" style="margin-top:4px">최근 추천 이력</div>
+  _perfChecked.clear();  // 렌더링 시 선택 초기화
+  html += `<div class="lbl" style="margin-top:4px;display:flex;align-items:center;justify-content:space-between">
+    <span>최근 추천 이력</span>
+    <button id="perf-bulk-del-btn" onclick="bulkDeletePerf()"
+      disabled style="opacity:.4;font-size:11px;padding:4px 10px;background:rgba(239,68,68,.15);
+      border:1px solid rgba(239,68,68,.4);border-radius:6px;color:#f87171;cursor:pointer">
+      선택 삭제
+    </button>
+  </div>
   <div class="card">`;
 
   const sorted = [...recs].sort((a,b) => (b.rec_date||'').localeCompare(a.rec_date||''));
 
+  // 날짜별 그룹핑
+  const byDate = {};
+  sorted.forEach(r => {
+    const d = (r.rec_date||'').slice(0,10);
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(r);
+  });
+
   if (!sorted.length) {
     html += '<div class="perf-empty" style="padding:16px">추천 이력 없음</div>';
   } else {
-    sorted.forEach(r => {
-      const grade = r.grade || 'LOW';
-      const gc = gradeColor[grade] || 'var(--txt3)';
-      const gl = gradeLabel[grade] || grade;
-      const date = (r.rec_date||'').slice(0,10);
-      const rets = r.returns || {};
-
-      const retChips = periods.map(p => {
-        if (!(p.key in rets)) return `<span class="perf-ret-chip" style="background:var(--bg3);color:var(--txt3)">${p.lbl} —</span>`;
-        const v = rets[p.key];
-        const cls = v >= 0 ? 'var(--green)' : 'var(--red)';
-        const bg  = v >= 0 ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)';
-        return `<span class="perf-ret-chip" style="background:${bg};color:${cls}">${p.lbl} ${v>=0?'+':''}${v}%</span>`;
-      }).join('');
-
-      html += `<div class="perf-rec-item">
-        <div class="perf-rec-top">
-          <span class="perf-rec-name">${esc(r.name||r.code)}</span>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:10px;font-weight:700;color:${gc}">${gl}</span>
-            <button onclick="deletePerfRecord('${esc(r.code)}','${(r.rec_date||'').slice(0,10)}')" style="font-size:10px;color:var(--txt3);background:none;border:1px solid var(--line2);border-radius:4px;padding:1px 5px;cursor:pointer;line-height:1.4">삭제</button>
-          </div>
-        </div>
-        <div class="perf-rec-meta">${esc(r.code)} · ${esc(r.sector||'—')} · ${date} · ${r.rec_price?r.rec_price.toLocaleString()+'원 추천':'가격 미기록'} · 점수 ${r.score||0}</div>
-        <div class="perf-rec-rets">${retChips}</div>
+    Object.entries(byDate).forEach(([date, items]) => {
+      const dateCls = `perf-cb-${date.replace(/-/g,'')}`;
+      // 날짜 헤더 (클릭으로 해당 날짜 전체 선택)
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:8px 0 4px;border-bottom:1px solid var(--line);margin-bottom:4px">
+        <input type="checkbox" style="cursor:pointer;accent-color:#6366f1"
+          onchange="togglePerfDateGroup('${date}',this.checked)">
+        <span style="font-size:11px;font-weight:700;color:var(--txt3)">${date}</span>
+        <span style="font-size:10px;color:var(--txt3)">${items.length}건</span>
       </div>`;
+
+      items.forEach(r => {
+        const grade = r.grade || 'LOW';
+        const gc = gradeColor[grade] || 'var(--txt3)';
+        const gl = gradeLabel[grade] || grade;
+        const d2 = (r.rec_date||'').slice(0,10);
+        const rets = r.returns || {};
+        const key = `${r.code}::${d2}`;
+
+        const retChips = periods.map(p => {
+          if (!(p.key in rets)) return `<span class="perf-ret-chip" style="background:var(--bg3);color:var(--txt3)">${p.lbl} —</span>`;
+          const v = rets[p.key];
+          const cls = v >= 0 ? 'var(--green)' : 'var(--red)';
+          const bg  = v >= 0 ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)';
+          return `<span class="perf-ret-chip" style="background:${bg};color:${cls}">${p.lbl} ${v>=0?'+':''}${v}%</span>`;
+        }).join('');
+
+        html += `<div class="perf-rec-item" style="display:flex;align-items:flex-start;gap:8px">
+          <input type="checkbox" class="${dateCls}" data-key="${key}"
+            style="margin-top:4px;cursor:pointer;flex-shrink:0;accent-color:#6366f1"
+            onchange="togglePerfCheck('${key}',this)">
+          <div style="flex:1;min-width:0">
+            <div class="perf-rec-top">
+              <span class="perf-rec-name">${esc(r.name||r.code)}</span>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:10px;font-weight:700;color:${gc}">${gl}</span>
+                <button onclick="deletePerfRecord('${esc(r.code)}','${d2}')"
+                  style="font-size:10px;color:var(--txt3);background:none;border:1px solid var(--line2);border-radius:4px;padding:1px 5px;cursor:pointer;line-height:1.4">삭제</button>
+              </div>
+            </div>
+            <div class="perf-rec-meta">${esc(r.code)} · ${esc(r.sector||'—')} · ${d2} · ${r.rec_price?r.rec_price.toLocaleString()+'원 추천':'가격 미기록'} · 점수 ${r.score||0}</div>
+            <div class="perf-rec-rets">${retChips}</div>
+          </div>
+        </div>`;
+      });
     });
   }
 
