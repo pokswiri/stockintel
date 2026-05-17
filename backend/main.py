@@ -807,7 +807,10 @@ async def analyze(
     if _TRACKER_LOADED:
         try:
             if nexus_result.get("available") and nexus_result.get("top"):
-                save_recommendations(nexus_result["top"], analyzed_at)
+                # 현재 세션 판단 후 전달 (장전/장중/장후 분류 저장)
+                from tracker import _classify_session
+                sess = _classify_session(analyzed_at)
+                save_recommendations(nexus_result["top"], analyzed_at, session=sess)
             # 기존 추천 종목 수익률 업데이트 (거래일 기반 정확한 d1/d3/d5/d10)
             if is_kis_available():
                 from kis_official import batch_fetch_prices as _bfp, fetch_daily_chart as _fdc

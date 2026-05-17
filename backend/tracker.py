@@ -113,22 +113,54 @@ def delete_record(code: str, rec_date: str) -> bool:
     return False
 
 
-def save_recommendations(nexus_top: list, analyzed_at: str = None):
+def _classify_session(dt_str: str) -> str:
+    """
+    분석 시각 기준 장 세션 분류 (KST)
+    pre     : ~09:00 (장 전)
+    regular : 09:00~15:30 (정규장)
+    after   : 15:30~ (장 후 / 야간장 포함)
+    """
+    try:
+        from datetime import timezone, timedelta
+        KST = timezone(timedelta(hours=9))
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=KST)
+        else:
+            dt = dt.astimezone(KST)
+        t = dt.hour * 60 + dt.minute
+        if t < 9 * 60:
+            return "pre"
+        elif t < 15 * 60 + 30:
+            return "regular"
+        else:
+            return "after"
+    except Exception:
+        return "unknown"
+
+
+def save_recommendations(nexus_top: list, analyzed_at: str = None, session: str = None):
     """
     NEXUS top 추천 종목 저장
-    - 이미 오늘 저장된 종목은 중복 저장 안 함
+    - 이미 오늘 같은 session + 같은 코드는 중복 저장 안 함
+    - session: pre / regular / after / unknown
     """
     if not nexus_top:
         return
 
     data  = _load()
-    today = (analyzed_at or datetime.now().isoformat())[:10]  # YYYY-MM-DD
+    now_str = analyzed_at or datetime.now().isoformat()
+    today = now_str[:10]  # YYYY-MM-DD
 
-    # 오늘 이미 저장된 코드 목록
+    # session 자동 판단 (전달 없으면 시각 기반)
+    sess = session or _classify_session(now_str)
+
+    # 오늘 + 같은 session에 이미 저장된 코드 목록
     already = {
         r["code"]
         for r in data["records"]
         if r.get("rec_date", "")[:10] == today
+        and r.get("session", "unknown") == sess
     }
 
     new_count = 0
@@ -140,21 +172,23 @@ def save_recommendations(nexus_top: list, analyzed_at: str = None):
         record = {
             "code":       code,
             "name":       item.get("name", ""),
-            "rec_date":   analyzed_at or datetime.now().isoformat(),
+            "rec_date":   now_str,
             "rec_price":  item.get("price", 0),
             "mktcap":     item.get("mktcap", 0),
             "grade":      item.get("nexus", {}).get("grade", ""),
             "score":      item.get("nexus", {}).get("total", 0),
             "sector":     item.get("sector_key", ""),
-            "returns":    {},   # 수익률 채워질 공간
+            "session":    sess,          # 장전/장중/장후 분류
+            "returns":    {},
             "updated_at": "",
         }
         data["records"].append(record)
+        already.add(code)
         new_count += 1
 
     if new_count > 0:
         _save(data)
-        print(f"[TRACKER] {new_count}개 신규 추천 저장 완료 ({today})")
+        print(f"[TRACKER] {new_count}개 저장 완료 ({today} / {sess})")
 
 
 def update_returns(price_fetcher_fn):
