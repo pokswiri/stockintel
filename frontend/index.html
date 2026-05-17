@@ -900,6 +900,12 @@ function togglePerfDateGroup(groupKey, checked) {
   _updateBulkDeleteBtn();
 }
 
+function setPerfSession(sess) {
+  window._perfSession = sess;
+  _perfLoaded = false;
+  loadPerf(true);
+}
+
 function _updateBulkDeleteBtn() {
   const btn = document.getElementById('perf-bulk-del-btn');
   if (!btn) return;
@@ -1837,13 +1843,57 @@ function renderPerf(d) {
       border:1px solid rgba(239,68,68,.4);border-radius:6px;color:#f87171;cursor:pointer">
       선택 삭제
     </button>
-  </div>
-  <div class="card">`;
+  </div>`;
 
-  const sorted = [...recs].sort((a,b) => (b.rec_date||'').localeCompare(a.rec_date||''));
+  // 세션 필터 탭
+  const SESSION_LABELS = {
+    after:   { label:'📊 장후',  desc:'15:30 이후 — 다음날 매수 기준 (가장 신뢰)' },
+    pre:     { label:'🌅 장전',  desc:'09:00 이전 — 오늘 매수 후보' },
+    regular: { label:'📈 장중',  desc:'09:00~15:30 — 수급 변동 큰 구간' },
+    unknown: { label:'❓ 기타',  desc:'세션 미분류' },
+  };
+
+  // 현재 선택 세션 (전역 상태)
+  if (typeof window._perfSession === 'undefined') window._perfSession = 'after';
+
+  const sessionCounts = {};
+  recs.forEach(r => {
+    const s = r.session || 'unknown';
+    sessionCounts[s] = (sessionCounts[s] || 0) + 1;
+  });
+
+  html += `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">`;
+  ['after','pre','regular','unknown'].forEach(s => {
+    const cnt = sessionCounts[s] || 0;
+    if (!cnt && s === 'unknown') return;
+    const isActive = window._perfSession === s;
+    const lbl = SESSION_LABELS[s];
+    html += `<button onclick="setPerfSession('${s}')"
+      style="font-size:11px;padding:5px 10px;border-radius:8px;cursor:pointer;
+      background:${isActive?'rgba(99,102,241,.25)':'var(--bg3)'};
+      border:1px solid ${isActive?'#6366f1':'var(--line)'};
+      color:${isActive?'#a5b4fc':'var(--txt3)'}">
+      ${lbl.label} <span style="font-size:10px;opacity:.7">${cnt}</span>
+    </button>`;
+  });
+  html += `</div>`;
+
+  // 선택 세션 설명
+  const curSessLabel = SESSION_LABELS[window._perfSession] || SESSION_LABELS.after;
+  html += `<div style="font-size:10px;color:var(--txt3);margin-bottom:8px;padding:6px 10px;background:var(--bg2);border-radius:6px">
+    ${curSessLabel.desc}
+  </div>`;
+
+  // 선택 세션에 해당하는 이력만 표시
+  const filteredRecs = recs.filter(r => (r.session || 'unknown') === window._perfSession);
+  const sorted = [...filteredRecs].sort((a,b) => (b.rec_date||'').localeCompare(a.rec_date||''));
+
+  html += `<div class="card">`;
 
   if (!sorted.length) {
-    html += '<div class="perf-empty" style="padding:16px">추천 이력 없음</div>';
+    html += `<div class="perf-empty" style="padding:16px">
+      ${window._perfSession === 'after' ? '장후 추천 이력 없음 — 장 마감(15:30) 후 분석 시 저장됩니다' : '이력 없음'}
+    </div>`;
   } else {
     // 거래일 기준 그룹핑 (추천일 기준 경과 거래일수)
     const today = new Date();
