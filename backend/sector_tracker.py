@@ -170,10 +170,18 @@ async def _fetch_sector_data(sector_key: str) -> dict:
         try:
             etf = await fetch_etf_price(etf_code, etf_name)
             result["etf_chg"] = etf.get("chg_pct", 0.0)
-            # ETF 거래량 비율
-            etf_vol = etf.get("volume", 0)
-            if etf_vol > 0:
-                result["_etf_vol_today"] = etf_vol
+            # ETF 차트로 volume_ratio 계산 (20일 평균 대비 오늘 거래량)
+            try:
+                etf_chart = await fetch_daily_chart(etf_code)
+                etf_bars  = etf_chart.get("bars", [])
+                if len(etf_bars) >= 5:
+                    vols = [b.get("volume", 0) for b in etf_bars[-21:]]
+                    avg20 = sum(vols[:-1]) / len(vols[:-1]) if len(vols) > 1 else 0
+                    today_vol = vols[-1]
+                    if avg20 > 0:
+                        result["volume_ratio"] = round(today_vol / avg20, 2)
+            except Exception:
+                pass
         except Exception:
             pass
 

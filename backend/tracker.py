@@ -367,13 +367,52 @@ def get_performance_stats() -> dict:
             for p, v in periods.items()
         }
 
-    # 최근 30개 추천만 반환 (프론트 표시용)
-    recent = sorted(records, key=lambda x: x.get("rec_date", ""), reverse=True)[:30]
+    # 최근 추천 전체 반환 (통계와 이력 일치를 위해 전체 records 반환)
+    recent = sorted(records, key=lambda x: x.get("rec_date", ""), reverse=True)
+
+    # grade_stats를 실제 이력(recent)에 있는 종목 기준으로만 재계산
+    visible_codes_dates = {(r.get("code"), r.get("rec_date","")[:10]) for r in recent}
+    grade_stats_visible: dict = {}
+    sector_stats_visible: dict = {}
+    for rec in records:
+        key = (rec.get("code"), rec.get("rec_date","")[:10])
+        if key not in visible_codes_dates:
+            continue  # 이력에 없는 기록은 통계에서도 제외
+        grade  = rec.get("grade", "UNKNOWN")
+        sector = rec.get("sector", "unknown")
+        rets   = rec.get("returns", {})
+        for period in ["d1", "d3", "d5", "d10"]:
+            if period not in rets:
+                continue
+            ret = rets[period]
+            if grade not in grade_stats_visible:
+                grade_stats_visible[grade] = {}
+            if period not in grade_stats_visible[grade]:
+                grade_stats_visible[grade][period] = []
+            grade_stats_visible[grade][period].append(ret)
+            if sector not in sector_stats_visible:
+                sector_stats_visible[sector] = {}
+            if period not in sector_stats_visible[sector]:
+                sector_stats_visible[sector][period] = []
+            sector_stats_visible[sector][period].append(ret)
+
+    grade_summary_v = {}
+    for g, periods in grade_stats_visible.items():
+        grade_summary_v[g] = {
+            p: {"avg": avg(v), "win_rate": win(v), "count": len(v)}
+            for p, v in periods.items()
+        }
+    sector_summary_v = {}
+    for s, periods in sector_stats_visible.items():
+        sector_summary_v[s] = {
+            p: {"avg": avg(v), "win_rate": win(v), "count": len(v)}
+            for p, v in periods.items()
+        }
 
     return {
         "total_count":    len(records),
-        "grade_stats":    grade_summary,
-        "sector_stats":   sector_summary,
+        "grade_stats":    grade_summary_v,
+        "sector_stats":   sector_summary_v,
         "records":        recent,
         "last_updated":   datetime.now().isoformat(),
     }
