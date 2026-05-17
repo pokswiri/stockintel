@@ -886,8 +886,12 @@ function togglePerfCheck(key, cb) {
   _updateBulkDeleteBtn();
 }
 
-function togglePerfDateGroup(date, checked) {
-  document.querySelectorAll(`.perf-cb-${date.replace(/-/g,'')}`).forEach(cb => {
+function togglePerfDateGroup(groupKey, checked) {
+  // groupKey: 'grp-1' (거래일 그룹) 또는 날짜 '2026-05-10' (하위호환)
+  const cls = groupKey.startsWith('grp-')
+    ? `perf-cb-grp-${groupKey.slice(4)}`
+    : `perf-cb-${groupKey.replace(/-/g,'')}`;
+  document.querySelectorAll(`.${cls}`).forEach(cb => {
     cb.checked = checked;
     const key = cb.dataset.key;
     if (checked) _perfChecked.add(key);
@@ -1330,17 +1334,23 @@ async function loadWatchScores() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function breakdownBar(bd) {
   if (!bd || !Object.keys(bd).length) return '';
+  // 실제 API 반환 키: vcp(max25), stage2(max20), rsi(max12), volume(max10),
+  //   position(max8), frgn(score있음), vol_rate(max5), candle_signal, money_flow
   const ITEMS = [
-    {k:'stage',    label:'스테이지',  max:30, col:'#60a5fa'},
-    {k:'volume',   label:'거래량',    max:25, col:'#34d399'},
-    {k:'frgn',     label:'외국인',    max:25, col:'#a78bfa'},
-    {k:'technical',label:'기술패턴',  max:25, col:'#fbbf24'},
-    {k:'candle',   label:'캔들',      max:15, col:'#f97316'},
-    {k:'money',    label:'자금흐름',  max:10, col:'#f87171'},
+    {k:'vcp',          label:'VCP',    max:25, col:'#60a5fa'},
+    {k:'stage2',       label:'추세',   max:20, col:'#a78bfa'},
+    {k:'rsi',          label:'RSI',    max:12, col:'#fbbf24'},
+    {k:'volume',       label:'거래량', max:10, col:'#34d399'},
+    {k:'frgn',         label:'외국인', max:10, col:'#f97316'},
+    {k:'position',     label:'52주',   max:8,  col:'#60a5fa'},
+    {k:'vol_rate',     label:'거래↑',  max:5,  col:'#34d399'},
+    {k:'candle_signal',label:'캔들',   max:10, col:'#f87171'},
+    {k:'money_flow',   label:'자금',   max:10, col:'#ef4444'},
   ];
   return ITEMS.filter(i => i.k in bd).map(i => {
-    const v = bd[i.k] ?? 0;
-    const pct = Math.min(100, Math.round(v / i.max * 100));
+    const v   = bd[i.k]?.score ?? bd[i.k] ?? 0;
+    const max = bd[i.k]?.max   ?? i.max;
+    const pct = max > 0 ? Math.min(100, Math.round(v / max * 100)) : 0;
     return `<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
       <span style="font-size:9px;color:var(--txt3);width:44px;flex-shrink:0">${i.label}</span>
       <div style="flex:1;background:var(--bg3);border-radius:2px;height:4px">
@@ -1819,9 +1829,9 @@ function renderPerf(d) {
   }
 
   // 최근 추천 이력
-  _perfChecked.clear();  // 렌더링 시 선택 초기화
+  _perfChecked.clear();
   html += `<div class="lbl" style="margin-top:4px;display:flex;align-items:center;justify-content:space-between">
-    <span>최근 추천 이력</span>
+    <span>추천 이력 <span style="font-size:10px;color:var(--txt3)">(거래일 기준)</span></span>
     <button id="perf-bulk-del-btn" onclick="bulkDeletePerf()"
       disabled style="opacity:.4;font-size:11px;padding:4px 10px;background:rgba(239,68,68,.15);
       border:1px solid rgba(239,68,68,.4);border-radius:6px;color:#f87171;cursor:pointer">
@@ -1832,24 +1842,46 @@ function renderPerf(d) {
 
   const sorted = [...recs].sort((a,b) => (b.rec_date||'').localeCompare(a.rec_date||''));
 
-  // 날짜별 그룹핑
-  const byDate = {};
-  sorted.forEach(r => {
-    const d = (r.rec_date||'').slice(0,10);
-    if (!byDate[d]) byDate[d] = [];
-    byDate[d].push(r);
-  });
-
   if (!sorted.length) {
     html += '<div class="perf-empty" style="padding:16px">추천 이력 없음</div>';
   } else {
-    Object.entries(byDate).forEach(([date, items]) => {
-      const dateCls = `perf-cb-${date.replace(/-/g,'')}`;
-      // 날짜 헤더 (클릭으로 해당 날짜 전체 선택)
+    // 거래일 기준 그룹핑 (추천일 기준 경과 거래일수)
+    const today = new Date();
+    const toTradingDays = (recDateStr) => {
+      const rec = new Date(recDateStr.slice(0,10));
+      let days = 0, cur = new Date(rec);
+      cur.setDate(cur.getDate() + 1);
+      while (cur <= today) {
+        const dow = cur.getDay();
+        if (dow !== 0 && dow !== 6) days++;
+        cur.setDate(cur.getDate() + 1);
+      }
+      return days;
+    };
+
+    const GROUP_LABELS = [
+      { key: '0', label: '📅 추천 당일', min: 0, max: 0 },
+      { key: '1', label: '📈 1거래일 후', min: 1, max: 1 },
+      { key: '2', label: '📈 2거래일 후', min: 2, max: 2 },
+      { key: '3', label: '📈 3거래일 후', min: 3, max: 3 },
+      { key: '4+', label: '📊 4거래일 이상', min: 4, max: 9999 },
+    ];
+
+    // 각 종목에 거래일수 할당
+    const withDays = sorted.map(r => ({
+      ...r,
+      _tradeDays: toTradingDays(r.rec_date || '')
+    }));
+
+    GROUP_LABELS.forEach(grp => {
+      const items = withDays.filter(r => r._tradeDays >= grp.min && r._tradeDays <= grp.max);
+      if (!items.length) return;
+
+      const grpCls = `perf-cb-grp-${grp.key}`;
       html += `<div style="display:flex;align-items:center;gap:8px;padding:8px 0 4px;border-bottom:1px solid var(--line);margin-bottom:4px">
         <input type="checkbox" style="cursor:pointer;accent-color:#6366f1"
-          onchange="togglePerfDateGroup('${date}',this.checked)">
-        <span style="font-size:11px;font-weight:700;color:var(--txt3)">${date}</span>
+          onchange="togglePerfDateGroup('grp-${grp.key}',this.checked)">
+        <span style="font-size:11px;font-weight:700;color:var(--txt3)">${grp.label}</span>
         <span style="font-size:10px;color:var(--txt3)">${items.length}건</span>
       </div>`;
 
@@ -1870,7 +1902,7 @@ function renderPerf(d) {
         }).join('');
 
         html += `<div class="perf-rec-item" style="display:flex;align-items:flex-start;gap:8px">
-          <input type="checkbox" class="${dateCls}" data-key="${key}"
+          <input type="checkbox" class="${grpCls}" data-key="${key}"
             style="margin-top:4px;cursor:pointer;flex-shrink:0;accent-color:#6366f1"
             onchange="togglePerfCheck('${key}',this)">
           <div style="flex:1;min-width:0">
